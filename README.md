@@ -230,7 +230,7 @@ POSTGRES_PASSWORD=law_app
 - Web 容器端口映射：`http://localhost:8080`
 - Web 访问入口：`http://localhost:8080`
 
-Web 容器内的 Node 静态服务器会把 `/api/*` 代理到 compose 网络内的 `http://api:4000`。
+Web 容器内的 nginx 会把 `/api/*` 代理到 compose 网络内的 `http://api:4000`。
 因此浏览器访问 `http://localhost:8080` 时，不需要额外配置前端 API 地址。
 
 ### B. 本地已有外部 PostgreSQL
@@ -303,6 +303,18 @@ curl http://localhost:4000/api/v1/health
   "langfuseConfigured": false
 }
 ```
+
+---
+
+## 生产部署骨架
+
+生产部署说明见 `docker/README.md`。当前生产骨架参考 `D:\linkyun-concept\docker\README.md`：
+
+- 构建 VM 执行 Docker build。
+- `law-app-web` 使用 nginx 作为生产入口，服务 H5 静态文件并把 `/api/` 反代到 FastAPI。
+- `law-app-api` 与 `law-app-web` 通过 `docker save | gzip | ssh docker load` 直传 ECS，不依赖镜像仓库。
+- ECS 使用 image-only 的 `docker/docker-compose.prod.yml` 和 `docker/docker-compose.infra.prod.yml`。
+- 前后端域名尚未确定，`server_name`、`ALLOWED_ORIGINS` 和 API base 先保留为后续可替换配置。
 
 ---
 
@@ -395,14 +407,14 @@ git diff --check
 | --- | --- |
 | `http://localhost:5173` 打不开 | 确认 `pnpm dev:web` 或 `pnpm dev` 正在运行，且 5173 端口未被占用 |
 | API health 不通 | 确认 Python/FastAPI API 正在 `4000` 端口运行；推荐直接用 `uv run --directory apps/api --project . uvicorn app.main:app --reload --host 0.0.0.0 --port 4000`，`pnpm dev:api` 只是等价别名 |
-| 前端请求 API 失败 | 开发模式检查 Vite `/api` proxy；compose 模式检查 Web 容器 `API_TARGET=http://api:4000` |
+| 前端请求 API 失败 | 开发模式检查 Vite `/api` proxy；compose 模式检查 nginx `/api/` 反代和 `api` 服务健康状态 |
 | 登录失败 | 检查 `MOCK_OTP_CODE`，默认验证码是 `123456`，验证码也会在请求返回中给出 |
 | compose 下 API 连不上数据库 | 服务器从 0 到 1 部署先确认 `docker compose --env-file apps/api/.env -f docker/docker-compose.infra.yml up -d` 已启动；再确认 app 与 infra 都在 `law-app-net` 网络 |
 | 本地外部 Postgres 连接失败 | 不要使用 `POSTGRES_HOST=postgres`；在 `apps/api/.env` 把 `POSTGRES_HOST` 改成 API 容器可访问的外部数据库地址 |
 | 上传失败或文件找不到 | 检查 `UPLOAD_DIR` 是否可写；compose 下检查根目录 `uploads/` volume |
 | LLM 没有生效 | health 的 `llmConfigured` 应为 `true`；确认 `OPENAI_API_BASE`、`OPENAI_API_KEY`、`DEFAULT_LLM_MODEL` 都已设置 |
 | LLM 调用失败但评估仍完成 | 这是预期行为；系统会回退到确定性评估，避免阻断演示流程 |
-| Docker Web 页面能开但 API 502 | 检查 `api` 服务健康状态和 `web` 服务内的 `API_TARGET` |
+| Docker Web 页面能开但 API 502 | 检查 `api` 服务健康状态和 nginx `/api/` 反代配置 |
 
 ---
 
