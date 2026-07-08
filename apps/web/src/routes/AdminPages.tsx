@@ -66,13 +66,23 @@ export function AdminUsersPage() {
               <span className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">{roleLabel(user.role)}</span>
               {user.role === 'lawyer' && <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700">{reviewLabel(user.lawyerReviewStatus)}</span>}
             </div>
-            <div className="flex gap-2">
-              {user.role !== 'admin' && user.accountStatus === 'active' && (
+            <div className="flex flex-wrap gap-2">
+              {user.accountStatus === 'active' && (
                 <>
-                  <button className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-black text-white" type="button" onClick={() => updateUser.mutate({ userId: user.id, input: { role: nextRole(user.role) } })}>
-                    调整角色
-                  </button>
-                  <button className="rounded-lg bg-red-50 px-3 py-2 text-sm font-black text-red-700" type="button" onClick={() => updateUser.mutate({ userId: user.id, input: { accountStatus: 'disabled' } })}>
+                  <label className="flex h-10 items-center gap-2 rounded-lg bg-slate-100 px-3 text-sm font-black text-slate-700">
+                    <span>角色</span>
+                    <select
+                      aria-label={`${user.name}角色`}
+                      className="bg-transparent font-black outline-none"
+                      value={user.role}
+                      onChange={(event) => updateUser.mutate({ userId: user.id, input: { role: event.target.value as UserRole } })}
+                    >
+                      <option value="client">客户</option>
+                      <option value="lawyer">律师</option>
+                      <option value="admin">管理员</option>
+                    </select>
+                  </label>
+                  <button aria-label={`禁用${user.name}`} className="rounded-lg bg-red-50 px-3 py-2 text-sm font-black text-red-700" type="button" onClick={() => updateUser.mutate({ userId: user.id, input: { accountStatus: 'disabled' } })}>
                     禁用账号
                   </button>
                 </>
@@ -171,10 +181,4 @@ function reviewLabel(status: User['lawyerReviewStatus']) {
   if (status === 'rejected') return '已拒绝';
   if (status === 'pending_review') return '待审核';
   return '无';
-}
-
-function nextRole(role: UserRole): UserRole {
-  if (role === 'client') return 'lawyer';
-  if (role === 'lawyer') return 'client';
-  return 'client';
 }

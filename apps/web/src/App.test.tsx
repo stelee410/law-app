@@ -242,6 +242,8 @@ const testMessage = {
 };
 
 let createdCasePayload: unknown;
+let adminUpdatePayload: Record<string, unknown> | undefined;
+let adminReviewPayload: Record<string, unknown> | undefined;
 
 beforeEach(() => {
   window.history.pushState({}, '', '/');
@@ -249,6 +251,8 @@ beforeEach(() => {
   queryClient.clear();
   useAuthStore.setState({ token: null, user: null, expiresAt: null });
   createdCasePayload = undefined;
+  adminUpdatePayload = undefined;
+  adminReviewPayload = undefined;
   window.scrollTo = vi.fn();
   vi.stubGlobal(
     'fetch',
@@ -273,6 +277,16 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/v1/messages')) {
         return Promise.resolve(jsonResponse({ messages: [testMessage] }));
+      }
+      if (url.includes('/api/v1/admin/users/') && method === 'PATCH') {
+        const userId = url.split('/').pop();
+        const sourceUser = [testAdmin, testUser, secondActiveUser, disabledUser, secondDisabledUser].find((item) => item.id === userId) ?? testUser;
+        adminUpdatePayload = input instanceof Request ? await input.clone().json() : JSON.parse(String(init?.body));
+        return Promise.resolve(jsonResponse({ user: { ...sourceUser, ...adminUpdatePayload } }));
+      }
+      if (url.includes('/api/v1/admin/lawyers/') && url.endsWith('/review') && method === 'POST') {
+        adminReviewPayload = input instanceof Request ? await input.clone().json() : JSON.parse(String(init?.body));
+        return Promise.resolve(jsonResponse({ user: { ...pendingLawyer, lawyerReviewStatus: adminReviewPayload?.status ?? 'approved', rejectedReason: adminReviewPayload?.rejectedReason } }));
       }
       if (url.endsWith('/api/v1/admin/users')) {
         return Promise.resolve(jsonResponse({ users: [testAdmin, testUser, secondActiveUser, disabledUser, secondDisabledUser] }));
@@ -520,12 +534,55 @@ describe('App', () => {
     expect(await screen.findByText('平台管理员')).toBeInTheDocument();
     expect(await screen.findByText('第二位用户')).toBeInTheDocument();
     expect(await screen.findByText('第二位禁用用户')).toBeInTheDocument();
-    expect(await screen.findAllByRole('button', { name: '调整角色' })).toHaveLength(2);
-    expect(await screen.findAllByRole('button', { name: '禁用账号' })).toHaveLength(2);
+    expect(await screen.findByRole('combobox', { name: '平台管理员角色' })).toHaveValue('admin');
+    expect(await screen.findByRole('button', { name: '禁用平台管理员' })).toBeInTheDocument();
+    expect(await screen.findAllByRole('combobox', { name: /角色/ })).toHaveLength(3);
+    expect(await screen.findAllByRole('button', { name: /禁用/ })).toHaveLength(3);
     expect(await screen.findAllByRole('button', { name: '恢复账号' })).toHaveLength(2);
-    expect(await screen.findByText('管理')).toBeInTheDocument();
-    expect(await screen.findByText('用户')).toBeInTheDocument();
-    expect(await screen.findByText('律师')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '管理' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '用户' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '律师' })).toBeInTheDocument();
+  });
+
+  it('lets admins explicitly promote users to admin from user management', async () => {
+    const user = userEvent.setup();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+    useAuthStore.getState().setSession({
+      token: 'admin-token',
+      user: testAdmin,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testAdmin);
+    queryClient.setQueryData(caseKeys.adminUsers, [testAdmin, testUser, secondActiveUser, disabledUser, secondDisabledUser]);
+    await router.navigate({ to: '/admin/users' });
+
+    render(<App />);
+
+    await user.selectOptions(await screen.findByRole('combobox', { name: '第二位用户角色' }), 'admin');
+
+    await waitFor(() => expect(adminUpdatePayload).toEqual({ role: 'admin' }));
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: caseKeys.adminOverview });
+  });
+
+  it('refreshes admin overview after lawyer reviews', async () => {
+    const user = userEvent.setup();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+    useAuthStore.getState().setSession({
+      token: 'admin-token',
+      user: testAdmin,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testAdmin);
+    queryClient.setQueryData(caseKeys.adminLawyers, [pendingLawyer, rejectedLawyer]);
+    await router.navigate({ to: '/admin/lawyers' });
+
+    render(<App />);
+
+    const approveButtons = await screen.findAllByRole('button', { name: '通过' });
+    await user.click(approveButtons[0]);
+
+    await waitFor(() => expect(adminReviewPayload).toEqual({ status: 'approved' }));
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: caseKeys.adminOverview });
   });
 
   it('renders built-in legal document pages', async () => {

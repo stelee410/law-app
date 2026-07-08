@@ -232,6 +232,7 @@ export function useUpdateAdminUserMutation() {
       );
       await queryClient.invalidateQueries({ queryKey: caseKeys.adminUsers });
       await queryClient.invalidateQueries({ queryKey: caseKeys.adminLawyers });
+      await queryClient.invalidateQueries({ queryKey: caseKeys.adminOverview });
     }
   });
 }
@@ -243,6 +244,7 @@ export function useReviewAdminLawyerMutation() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: caseKeys.adminUsers });
       await queryClient.invalidateQueries({ queryKey: caseKeys.adminLawyers });
+      await queryClient.invalidateQueries({ queryKey: caseKeys.adminOverview });
     }
   });
 }
