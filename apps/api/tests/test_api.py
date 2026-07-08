@@ -1,3 +1,10 @@
+import os
+
+os.environ["STORAGE_BACKEND"] = "memory"
+os.environ["OPENAI_API_BASE"] = ""
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["DEFAULT_LLM_MODEL"] = ""
+
 from fastapi.testclient import TestClient
 
 from app import store as store_module
@@ -5,8 +12,18 @@ from app.core.config import Settings
 from app.main import create_app
 
 
+def _test_settings() -> Settings:
+  return Settings(
+    MOCK_OTP_CODE="654321",
+    STORAGE_BACKEND="memory",
+    OPENAI_API_BASE=None,
+    OPENAI_API_KEY=None,
+    DEFAULT_LLM_MODEL=None,
+  )
+
+
 def test_minimal_case_workflow() -> None:
-  client = TestClient(create_app(Settings(MOCK_OTP_CODE="654321")))
+  client = TestClient(create_app(_test_settings()))
   headers = _login(client)
   case_id = _create_case(client, headers)
 
@@ -53,7 +70,7 @@ def test_minimal_case_workflow() -> None:
 
 
 def test_assessment_failure_is_recorded_as_event(monkeypatch) -> None:
-  client = TestClient(create_app(Settings(MOCK_OTP_CODE="654321")))
+  client = TestClient(create_app(_test_settings()))
   headers = _login(client)
   case_id = _create_case(client, headers)
 

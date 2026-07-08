@@ -1,6 +1,12 @@
 node_modules
 apps/*/node_modules
 apps/*/dist
+.env
+.env.*
+!.env.example
+apps/*/.env
+apps/*/.env.*
+!apps/*/.env.example
 .venv
 apps/api/.venv
 __pycache__

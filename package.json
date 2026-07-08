@@ -14,8 +14,10 @@
     "test:web": "pnpm --dir apps/web test",
     "lint": "pnpm --dir apps/web lint",
     "typecheck": "pnpm --dir apps/web typecheck",
-    "docker:up": "docker compose up --build",
-    "docker:down": "docker compose down --remove-orphans"
+    "docker:up": "docker compose --env-file apps/api/.env -f docker/docker-compose.yml up --build",
+    "docker:down": "docker compose --env-file apps/api/.env -f docker/docker-compose.yml down --remove-orphans",
+    "docker:infra:up": "docker compose --env-file apps/api/.env -f docker/docker-compose.infra.yml up -d",
+    "docker:infra:down": "docker compose --env-file apps/api/.env -f docker/docker-compose.infra.yml down"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

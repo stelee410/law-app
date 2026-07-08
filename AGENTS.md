@@ -6,7 +6,8 @@ This repository is a full-stack mobile H5 legal case workflow scaffold. The root
 - `apps/api/app`: Python FastAPI backend. Domain boundaries are split into `auth`, `cases`, `evidence`, `events`, `workflows`, `core`, and `api/v1`.
 - `apps/api/tests`: pytest API and workflow integration tests.
 - `apps/web/src`: Vite React H5 app with `routes`, `hooks`, `lib`, `state`, and global styles.
-- `Dockerfile` and `docker-compose.yml`: API and web container builds.
+- `docker/Dockerfile` and `docker/docker-compose.yml`: API and web container builds.
+- `docker/docker-compose.infra.yml`: PostgreSQL infrastructure for zero-to-one server deployment.
 
 ## Build, Test, and Development Commands
 Install dependencies before local work:
@@ -18,7 +19,8 @@ Install dependencies before local work:
 - `pnpm typecheck`: run web TypeScript checks.
 - `pnpm build`: build the H5 frontend.
 - `pnpm lint`: run web ESLint.
-- `docker compose up --build`: build and run API plus web containers.
+- `docker compose --env-file apps/api/.env -f docker/docker-compose.infra.yml up -d`: start PostgreSQL infrastructure.
+- `docker compose --env-file apps/api/.env -f docker/docker-compose.yml up --build`: build and run API plus web containers.
 
 ## Coding Style & Naming Conventions
 Use Python for the backend and TypeScript for the frontend. Match the existing 2-space indentation style. Backend modules expose small service functions and keep API routing thin. Frontend components use PascalCase, hooks use `use*`, shared client code lives in `apps/web/src/lib`, and route screens live in `apps/web/src/routes`.

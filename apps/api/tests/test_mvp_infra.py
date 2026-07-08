@@ -12,6 +12,17 @@ from app.store import InMemoryStore
 from app.workflows.case_assessment import assess_case
 
 
+def _memory_settings(**overrides):
+  values = {
+    "STORAGE_BACKEND": "memory",
+    "OPENAI_API_BASE": None,
+    "OPENAI_API_KEY": None,
+    "DEFAULT_LLM_MODEL": None,
+  }
+  values.update(overrides)
+  return Settings(**values)
+
+
 def _create_demo_case(store: InMemoryStore):
   otp = store.request_login_code("13800001234")
   session = store.login_with_code("13800001234", otp["code"])
@@ -64,7 +75,7 @@ def test_settings_parses_mvp_infrastructure_fields(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_upload_evidence_persists_file_to_upload_dir(tmp_path: Path) -> None:
-  settings = Settings(MOCK_OTP_CODE="654321", UPLOAD_DIR=str(tmp_path))
+  settings = _memory_settings(MOCK_OTP_CODE="654321", UPLOAD_DIR=str(tmp_path))
   store = InMemoryStore(settings)
   session, law_case = _create_demo_case(store)
 
@@ -84,7 +95,7 @@ async def test_upload_evidence_persists_file_to_upload_dir(tmp_path: Path) -> No
 
 @pytest.mark.anyio
 async def test_upload_evidence_keeps_duplicate_filenames_separate(tmp_path: Path) -> None:
-  settings = Settings(MOCK_OTP_CODE="654321", UPLOAD_DIR=str(tmp_path))
+  settings = _memory_settings(MOCK_OTP_CODE="654321", UPLOAD_DIR=str(tmp_path))
   store = InMemoryStore(settings)
   session, law_case = _create_demo_case(store)
 
@@ -112,7 +123,7 @@ async def test_upload_evidence_keeps_duplicate_filenames_separate(tmp_path: Path
 
 @pytest.mark.anyio
 async def test_upload_evidence_rejects_unknown_category_without_writing(tmp_path: Path) -> None:
-  settings = Settings(MOCK_OTP_CODE="654321", UPLOAD_DIR=str(tmp_path))
+  settings = _memory_settings(MOCK_OTP_CODE="654321", UPLOAD_DIR=str(tmp_path))
   store = InMemoryStore(settings)
   session, law_case = _create_demo_case(store)
 
@@ -131,7 +142,7 @@ async def test_upload_evidence_rejects_unknown_category_without_writing(tmp_path
 @pytest.mark.anyio
 async def test_upload_evidence_rejects_oversized_file_without_writing(tmp_path: Path, monkeypatch) -> None:
   monkeypatch.setattr(evidence_service, "MAX_UPLOAD_BYTES", 8)
-  settings = Settings(MOCK_OTP_CODE="654321", UPLOAD_DIR=str(tmp_path))
+  settings = _memory_settings(MOCK_OTP_CODE="654321", UPLOAD_DIR=str(tmp_path))
   store = InMemoryStore(settings)
   session, law_case = _create_demo_case(store)
 
@@ -150,7 +161,7 @@ async def test_upload_evidence_rejects_oversized_file_without_writing(tmp_path: 
 
 @pytest.mark.anyio
 async def test_upload_evidence_rejects_unsupported_file_type_without_writing(tmp_path: Path) -> None:
-  settings = Settings(MOCK_OTP_CODE="654321", UPLOAD_DIR=str(tmp_path))
+  settings = _memory_settings(MOCK_OTP_CODE="654321", UPLOAD_DIR=str(tmp_path))
   store = InMemoryStore(settings)
   session, law_case = _create_demo_case(store)
 
@@ -168,7 +179,11 @@ async def test_upload_evidence_rejects_unsupported_file_type_without_writing(tmp
 
 
 def test_llm_assessment_failure_falls_back_to_deterministic_result(monkeypatch) -> None:
-  settings = Settings(OPENAI_API_BASE="http://127.0.0.1:1/v1", OPENAI_API_KEY="sk-test")
+  settings = _memory_settings(
+    OPENAI_API_BASE="http://127.0.0.1:1/v1",
+    OPENAI_API_KEY="sk-test",
+    DEFAULT_LLM_MODEL="test-model",
+  )
   store = InMemoryStore(settings)
   _session, law_case = _create_demo_case(store)
 
