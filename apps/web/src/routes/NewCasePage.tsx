@@ -102,7 +102,7 @@ export function NewCasePage() {
         description={catalog.description}
         onBack={() => (step === 0 ? navigate({ to: '/' }) : setStep((value) => value - 1))}
       />
-      <section className="space-y-4 rounded-lg bg-white p-4 shadow-sm">
+      <section className="space-y-4 rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
         {stepFields.map((field) => (
           <Field key={String(field.id)} label={field.label}>
             <CaseInput
@@ -115,7 +115,7 @@ export function NewCasePage() {
         ))}
       </section>
       {step === 2 && (
-        <label className="flex gap-3 rounded-lg bg-white p-4 text-sm font-semibold leading-6 text-slate-700 shadow-sm">
+        <label className="flex gap-3 rounded-lg border border-slate-100 bg-white p-4 text-sm font-semibold leading-6 text-slate-700 shadow-sm">
           <input
             className="mt-1 size-4 shrink-0 accent-blue-600"
             type="checkbox"
@@ -133,7 +133,7 @@ export function NewCasePage() {
           </span>
         </label>
       )}
-      <p className="flex gap-2 rounded-lg bg-[#f5f4ed] p-3 text-sm font-semibold leading-6 text-[#8a4b36]">
+      <p className="flex gap-2 rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm font-semibold leading-6 text-amber-800">
         <ShieldCheck className="mt-0.5 shrink-0" size={16} />
         {step === 2 ? catalog.boundaryCopy : '你的信息将严格保密，仅用于案件处理和评估。'}
       </p>
@@ -141,7 +141,7 @@ export function NewCasePage() {
         <div className="rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">请先勾选隐私授权后提交。</div>
       )}
       {createCase.isError && <div className="rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">案件创建失败，请检查必填项。</div>}
-      <button className="mt-auto flex h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white disabled:opacity-50" type="submit" disabled={!canContinue || createCase.isPending}>
+      <button className="mt-auto flex h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="submit" disabled={!canContinue || createCase.isPending}>
         {step < 2 ? '下一步' : '下一步：上传证据'}
         {step < 2 ? <ArrowRight size={18} /> : <Check size={18} />}
       </button>
@@ -206,11 +206,11 @@ function Header({ step, title, description, onBack }: { step: number; title: str
   return (
     <header className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <button className="flex items-center gap-2 text-sm font-bold text-slate-600" type="button" onClick={onBack}>
+        <button className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-bold text-slate-600 shadow-sm" type="button" onClick={onBack}>
           <ArrowLeft size={17} />
           返回
         </button>
-        <button className="flex items-center gap-1 text-sm font-bold text-blue-700" type="button">
+        <button className="flex items-center gap-1 rounded-lg bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700" type="button">
           <HelpCircle size={16} />
           帮助
         </button>
@@ -222,7 +222,7 @@ function Header({ step, title, description, onBack }: { step: number; title: str
       </div>
       <div className="grid grid-cols-3 gap-2">
         {[0, 1, 2].map((item) => (
-          <span key={item} className={`h-2 rounded-full ${item <= step ? 'bg-blue-600' : 'bg-slate-200'}`} />
+          <span key={item} className={`h-2 rounded-full ${item <= step ? 'bg-blue-600' : 'bg-white shadow-sm'}`} />
         ))}
       </div>
     </header>

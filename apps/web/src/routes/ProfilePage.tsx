@@ -1,6 +1,7 @@
 import { Link, useNavigate } from '@tanstack/react-router';
 import { ChevronRight, FileCheck2, Headphones, HelpCircle, LogOut, ShieldCheck, UserRound } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { BrandHeader } from '../components/h5/BrandHeader';
 import { MetricCard } from '../components/h5/MetricCard';
 import { SectionHeader } from '../components/h5/SectionHeader';
 import { useCasesQuery } from '../hooks/useCaseQueries';
@@ -30,6 +31,8 @@ export function ProfilePage() {
 
   return (
     <div className="space-y-5">
+      <BrandHeader title="我的" description="账号、安全、文书和服务入口统一管理" />
+
       <section className="rounded-lg bg-white p-5 shadow-sm">
         <div className="flex items-center gap-4">
           <span className="grid size-16 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-700">

@@ -32,8 +32,8 @@ export function AssessmentPage() {
       </header>
 
       {!assessment && (
-        <section className="space-y-4 rounded-lg bg-white p-4 shadow-sm">
-          <div className="flex items-start gap-3 rounded-lg bg-[#f5f4ed] p-3 text-[#8a4b36]">
+        <section className="space-y-4 rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
+          <div className="flex items-start gap-3 rounded-lg border border-amber-100 bg-amber-50 p-3 text-amber-800">
             <Bot className="mt-0.5 shrink-0" size={22} />
             <div>
               <strong className="block">开始 AI 案件评估</strong>
@@ -49,7 +49,7 @@ export function AssessmentPage() {
             </div>
           ))}
           {evaluate.isError && <div className="rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">评估失败，请稍后重试。</div>}
-          <button className="h-12 w-full rounded-lg bg-blue-600 font-black text-white disabled:opacity-50" type="button" disabled={evaluate.isPending} onClick={() => evaluate.mutate(undefined)}>
+          <button className="h-12 w-full rounded-lg bg-blue-600 font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="button" disabled={evaluate.isPending} onClick={() => evaluate.mutate(undefined)}>
             {evaluate.isPending ? '评估中' : '开始评估'}
           </button>
         </section>

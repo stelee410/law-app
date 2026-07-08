@@ -39,20 +39,20 @@ export function CaseDetailPage() {
         返回案件列表
       </Link>
 
-      <section className="overflow-hidden rounded-lg bg-slate-950 p-5 text-white shadow-lg shadow-slate-300">
+      <section className="overflow-hidden rounded-lg border border-blue-100 bg-white p-5 text-slate-950 shadow-sm">
         <div className="flex items-start gap-3">
-          <span className="grid size-12 shrink-0 place-items-center rounded-lg bg-white text-blue-700">
+          <span className="grid size-12 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-700">
             <Scale size={25} />
           </span>
           <div className="min-w-0 flex-1">
             <h1 className="break-words text-2xl font-black tracking-normal">{lawCase.debtorName}</h1>
-            <p className="mt-1 break-words text-sm leading-5 text-slate-300">
+            <p className="mt-1 break-words text-sm leading-5 text-slate-500">
               {catalog.label} · {lawCase.caseNo} · {formatDate(lawCase.createdAt)}
             </p>
             <strong className="mt-4 block break-words text-3xl tracking-normal">{formatMoney(lawCase.amount)}</strong>
           </div>
         </div>
-        <div className="mt-4 rounded-lg bg-white/10 p-3 text-sm leading-6">
+        <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
           当前阶段：<b>{lawCase.status}</b>
         </div>
       </section>
@@ -86,14 +86,14 @@ export function CaseDetailPage() {
         <Timeline stages={lawCase.stages} />
       </section>
 
-      <section className="rounded-lg bg-[#f5f4ed] p-4 text-[#6f3f2f] shadow-sm">
+      <section className="rounded-lg border border-amber-100 bg-amber-50 p-4 text-amber-900 shadow-sm">
         <div className="flex items-center gap-2 text-sm font-black">
           <MessageCircle size={20} />
           最新进展
           <span className="ml-auto text-xs font-semibold opacity-70">{latest.time}</span>
         </div>
         <p className="mt-2 break-words text-sm leading-6">{latest.body}</p>
-        <a href={latest.href} className="mt-3 flex items-center justify-between rounded-lg bg-white/70 px-3 py-2 text-sm font-bold">
+        <a href={latest.href} className="mt-3 flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm font-bold">
           平台建议：查看下一步处理
           <ChevronRight size={17} />
         </a>
@@ -177,7 +177,7 @@ export function CaseDetailPage() {
             <small className="block text-sm font-semibold text-slate-500">咨询案件进展</small>
           </span>
         </Link>
-        <a href={nextHref} className="flex h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white shadow-lg shadow-blue-200">
+        <a href={nextHref} className="flex h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white shadow-sm shadow-blue-100">
           <Headphones size={18} />
           查看下一步建议
           <ChevronRight size={18} />

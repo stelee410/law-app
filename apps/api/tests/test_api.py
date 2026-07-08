@@ -594,6 +594,22 @@ def test_admin_cannot_be_changed_to_lawyer_through_public_onboarding() -> None:
   assert admin_after["role"] == "admin"
 
 
+def test_admin_cases_are_admin_only() -> None:
+  client = TestClient(create_app(_test_settings(ADMIN_PHONE="13600000000", ADMIN_NAME="平台管理员")))
+  client_headers = _register_client(client, phone="13800001234")
+  admin_headers = _login(client, phone="13600000000")
+  case_id = _create_case(client, client_headers)
+
+  admin_cases = client.get("/api/v1/admin/cases", headers=admin_headers)
+  assert admin_cases.status_code == 200
+  case_ids = [law_case["id"] for law_case in admin_cases.json()["cases"]]
+  assert case_id in case_ids
+
+  client_cases = client.get("/api/v1/admin/cases", headers=client_headers)
+  assert client_cases.status_code == 403
+  assert client_cases.json()["detail"] == "FORBIDDEN"
+
+
 def _login(client: TestClient, phone: str = "13800001234") -> dict[str, str]:
   code = _request_code(client, phone)
 

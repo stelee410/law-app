@@ -2,13 +2,16 @@ import { Link } from '@tanstack/react-router';
 import { BriefcaseBusiness, CheckCircle2, ShieldCheck, UsersRound, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { BrandHeader } from '../components/h5/BrandHeader';
 import {
+  useAdminCasesQuery,
   useAdminLawyersQuery,
   useAdminOverviewQuery,
   useAdminUsersQuery,
   useReviewAdminLawyerMutation,
   useUpdateAdminUserMutation
 } from '../hooks/useCaseQueries';
+import { formatDate, formatMoney } from '../lib/format';
 import type { User, UserRole } from '../lib/types';
 
 export function AdminDashboardPage() {
@@ -23,10 +26,11 @@ export function AdminDashboardPage() {
         <Metric label="待审" value={summary?.pendingLawyers ?? 0} />
       </section>
       <section className="grid grid-cols-2 gap-3">
+        <AdminLink to="/admin/cases" icon={<BriefcaseBusiness size={20} />} title="案件运营" body="查看全局案件进度" />
         <AdminLink to="/admin/users" icon={<UsersRound size={20} />} title="用户管理" body="禁用、恢复账号，调整角色" />
         <AdminLink to="/admin/lawyers" icon={<ShieldCheck size={20} />} title="律师审核" body="批准或拒绝律师入驻" />
       </section>
-      <section className="space-y-3 rounded-lg bg-white p-4 shadow-sm">
+      <section className="space-y-3 rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-2 text-sm font-black text-slate-900">
           <BriefcaseBusiness size={18} />
           最近案件
@@ -52,7 +56,7 @@ export function AdminUsersPage() {
       <AdminHeader title="用户管理" description="账号只做禁用/恢复和角色调整，不做物理删除。" />
       <section className="space-y-3">
         {userList.map((user) => (
-          <article key={user.id} className="space-y-3 rounded-lg bg-white p-4 shadow-sm">
+          <article key={user.id} className="space-y-3 rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="truncate text-base font-black text-slate-950">{user.name}</h2>
@@ -100,6 +104,47 @@ export function AdminUsersPage() {
   );
 }
 
+export function AdminCasesPage() {
+  const cases = useAdminCasesQuery();
+  const caseList = cases.data ?? [];
+
+  return (
+    <div className="space-y-5">
+      <AdminHeader title="案件运营" description="查看全平台案件、金额和服务状态，不直接代替客户或律师执行业务动作。" />
+      {cases.isError && <section className="rounded-lg bg-red-50 p-4 text-sm font-semibold text-red-700">案件列表加载失败，请稍后重试。</section>}
+      {!cases.isPending && !cases.isError && caseList.length === 0 && (
+        <section className="rounded-lg bg-white p-5 text-center shadow-sm">
+          <strong>暂无案件</strong>
+          <p className="mt-2 text-sm leading-6 text-slate-500">客户发起案件后，会在这里汇总运营视角。</p>
+        </section>
+      )}
+      <section className="space-y-3">
+        {caseList.map((lawCase) => (
+          <article key={lawCase.id} className="space-y-3 rounded-lg bg-white p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="break-words text-base font-black text-slate-950">{lawCase.debtorName}</h2>
+                <p className="mt-1 text-xs font-semibold text-slate-500">{lawCase.caseNo} · {formatDate(lawCase.createdAt)}</p>
+              </div>
+              <span className="shrink-0 rounded-full bg-blue-50 px-2 py-1 text-xs font-black text-blue-700">{lawCase.status}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <span className="rounded-lg bg-slate-50 p-3">
+                <b className="block text-slate-950">{formatMoney(lawCase.amount)}</b>
+                <small className="text-slate-500">登记金额</small>
+              </span>
+              <span className="rounded-lg bg-slate-50 p-3">
+                <b className="block text-slate-950">{lawCase.selectedPlan ? '已选择' : '待选择'}</b>
+                <small className="text-slate-500">服务方案</small>
+              </span>
+            </div>
+          </article>
+        ))}
+      </section>
+    </div>
+  );
+}
+
 export function AdminLawyersPage() {
   const lawyers = useAdminLawyersQuery();
   const reviewLawyer = useReviewAdminLawyerMutation();
@@ -108,13 +153,13 @@ export function AdminLawyersPage() {
   return (
     <div className="space-y-5">
       <AdminHeader title="律师审核" description="审核律师入驻资料，批准后才开放律师工作台。" />
-      <label className="block rounded-lg bg-white p-4 shadow-sm">
+      <label className="block rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
         <span className="mb-2 block text-sm font-black text-slate-700">拒绝原因</span>
         <input className="h-11 w-full rounded-lg bg-slate-50 px-3 outline-none focus:ring-2 focus:ring-blue-500" value={reason} onChange={(event) => setReason(event.target.value)} />
       </label>
       <section className="space-y-3">
         {(lawyers.data ?? []).map((lawyer) => (
-          <article key={lawyer.id} className="space-y-3 rounded-lg bg-white p-4 shadow-sm">
+          <article key={lawyer.id} className="space-y-3 rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
             <div>
               <h2 className="text-base font-black text-slate-950">{lawyer.name}</h2>
               <p className="mt-1 text-xs font-semibold text-slate-500">{lawyer.lawFirm} · {lawyer.practiceRegion}</p>
@@ -142,27 +187,21 @@ export function AdminLawyersPage() {
 }
 
 function AdminHeader({ title, description }: { title: string; description: string }) {
-  return (
-    <header className="space-y-2">
-      <p className="text-sm font-black text-blue-700">Admin</p>
-      <h1 className="text-2xl font-black tracking-normal text-slate-950">{title}</h1>
-      <p className="text-sm leading-6 text-slate-500">{description}</p>
-    </header>
-  );
+  return <BrandHeader eyebrow="Admin" title={title} description={description} />;
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg bg-white p-3 text-center shadow-sm">
+    <div className="rounded-lg border border-slate-100 bg-white p-3 text-center shadow-sm">
       <div className="text-xl font-black text-slate-950">{value}</div>
       <div className="mt-1 text-xs font-semibold text-slate-500">{label}</div>
     </div>
   );
 }
 
-function AdminLink({ to, icon, title, body }: { to: '/admin/users' | '/admin/lawyers'; icon: ReactNode; title: string; body: string }) {
+function AdminLink({ to, icon, title, body }: { to: '/admin/cases' | '/admin/users' | '/admin/lawyers'; icon: ReactNode; title: string; body: string }) {
   return (
-    <Link className="rounded-lg bg-white p-4 shadow-sm" to={to}>
+    <Link className="rounded-lg border border-slate-100 bg-white p-4 shadow-sm" to={to}>
       <span className="grid size-10 place-items-center rounded-lg bg-blue-50 text-blue-700">{icon}</span>
       <strong className="mt-3 block text-base text-slate-950">{title}</strong>
       <span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">{body}</span>

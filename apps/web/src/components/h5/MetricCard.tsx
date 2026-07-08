@@ -2,11 +2,11 @@ import type { ReactNode } from 'react';
 import type { Tone } from '../../lib/viewModel';
 
 const toneClass: Record<Tone, string> = {
-  blue: 'bg-blue-50 text-blue-800',
-  green: 'bg-emerald-50 text-emerald-800',
-  warm: 'bg-[#f5f4ed] text-[#8a4b36]',
-  slate: 'bg-slate-100 text-slate-800',
-  red: 'bg-red-50 text-red-700'
+  blue: 'border-blue-100 bg-white text-blue-800',
+  green: 'border-emerald-100 bg-white text-emerald-800',
+  warm: 'border-amber-100 bg-white text-amber-800',
+  slate: 'border-slate-100 bg-white text-slate-800',
+  red: 'border-red-100 bg-white text-red-700'
 };
 
 export function MetricCard({
@@ -23,7 +23,7 @@ export function MetricCard({
   icon?: ReactNode;
 }) {
   return (
-    <div className={`min-w-0 rounded-lg p-3 ${toneClass[tone]}`}>
+    <div className={`min-w-0 rounded-lg border p-3 shadow-sm ${toneClass[tone]}`}>
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-xs font-semibold opacity-80">{label}</span>
         {icon && <span className="shrink-0">{icon}</span>}

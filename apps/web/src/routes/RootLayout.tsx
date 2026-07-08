@@ -2,8 +2,24 @@ import { Outlet, useLocation, useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { BottomNav } from '../components/h5/BottomNav';
-import { useMeQuery } from '../hooks/useCaseQueries';
+import { useMeQuery, useMessagesQuery } from '../hooks/useCaseQueries';
 import { useAuthStore } from '../state/authStore';
+
+function isClientRoute(pathname: string) {
+  return pathname === '/' || pathname === '/cases' || pathname === '/cases/new' || pathname.startsWith('/cases/');
+}
+
+function isLawyerWorkspaceRoute(pathname: string) {
+  return pathname === '/lawyer' || (pathname.startsWith('/lawyer/') && pathname !== '/lawyer/review-status');
+}
+
+function isAdminRoute(pathname: string) {
+  return pathname === '/admin' || pathname.startsWith('/admin/');
+}
+
+function isSharedAuthRoute(pathname: string) {
+  return pathname === '/messages' || pathname === '/me';
+}
 
 export function RootLayout() {
   const { t } = useTranslation();
@@ -14,11 +30,15 @@ export function RootLayout() {
   const setUser = useAuthStore((state) => state.setUser);
   const logout = useAuthStore((state) => state.logout);
   const meQuery = useMeQuery();
+  const messagesQuery = useMessagesQuery();
   const isLogin = location.pathname === '/login';
   const isRegister = location.pathname.startsWith('/register/');
   const isLegal = location.pathname.startsWith('/legal/');
   const isPublic = isLogin || isRegister || isLegal;
   const isLawyerPending = user?.role === 'lawyer' && user.lawyerReviewStatus !== 'approved';
+  const isLawyerReviewStatus = location.pathname === '/lawyer/review-status';
+  const roleHome = user?.role === 'admin' ? '/admin' : user?.role === 'lawyer' ? (isLawyerPending ? '/lawyer/review-status' : '/lawyer') : '/';
+  const unreadCount = (messagesQuery.data ?? []).filter((message) => message.unread).length;
 
   useEffect(() => {
     if (meQuery.data) setUser(meQuery.data);
@@ -31,21 +51,34 @@ export function RootLayout() {
   useEffect(() => {
     if (!token && !isPublic) {
       void navigate({ to: '/login', replace: true });
+      return;
+    }
+    if (!token || !user) {
+      return;
     }
     if (token && (isLogin || isRegister)) {
-      const target = user?.role === 'admin' ? '/admin' : user?.role === 'lawyer' ? (isLawyerPending ? '/lawyer/review-status' : '/lawyer') : '/';
-      void navigate({ to: target, replace: true });
+      void navigate({ to: roleHome, replace: true });
+      return;
     }
-    if (token && user?.role === 'admin' && location.pathname === '/') {
+    if (isLegal) {
+      return;
+    }
+    if (user.role === 'admin' && !isAdminRoute(location.pathname) && !isSharedAuthRoute(location.pathname)) {
       void navigate({ to: '/admin', replace: true });
+      return;
     }
-    if (token && user?.role === 'lawyer' && isLawyerPending && location.pathname !== '/lawyer/review-status' && !isLegal) {
+    if (user.role === 'lawyer' && isLawyerPending && !isLawyerReviewStatus) {
       void navigate({ to: '/lawyer/review-status', replace: true });
+      return;
     }
-    if (token && user?.role === 'lawyer' && !isLawyerPending && location.pathname === '/') {
+    if (user.role === 'lawyer' && !isLawyerPending && (isClientRoute(location.pathname) || isAdminRoute(location.pathname) || isLawyerReviewStatus)) {
       void navigate({ to: '/lawyer', replace: true });
+      return;
     }
-  }, [isLegal, isLogin, isPublic, isRegister, isLawyerPending, location.pathname, navigate, token, user?.role]);
+    if (user.role === 'client' && (isAdminRoute(location.pathname) || isLawyerWorkspaceRoute(location.pathname) || isLawyerReviewStatus)) {
+      void navigate({ to: '/', replace: true });
+    }
+  }, [isLegal, isLogin, isPublic, isRegister, isLawyerPending, isLawyerReviewStatus, location.pathname, navigate, roleHome, token, user]);
 
   const showNav = Boolean(token && !isLogin && !isRegister);
   const needsAuthRedirect = !token && !isPublic;
@@ -67,7 +100,7 @@ export function RootLayout() {
             <Outlet />
           )}
         </div>
-        {showNav && <BottomNav pathname={location.pathname} role={user?.role} />}
+        {showNav && <BottomNav pathname={location.pathname} role={user?.role} unreadCount={unreadCount} />}
       </section>
     </main>
   );

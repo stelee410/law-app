@@ -9,12 +9,12 @@ export function EvidenceUploadPanel({
 }) {
   return (
     <section className="space-y-3">
-      <div className="flex items-start gap-2 rounded-lg bg-[#f5f4ed] p-3 text-sm leading-6 text-[#8a4b36]">
+      <div className="flex items-start gap-2 rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm leading-6 text-amber-800">
         <ShieldCheck className="mt-0.5 shrink-0" size={17} />
         <span>证据越完整，AI 评估越准确。优先上传合同、聊天记录、转账凭证和催收记录。</span>
       </div>
       <button
-        className="flex w-full flex-col items-center gap-3 rounded-lg border border-dashed border-blue-300 bg-blue-50 p-6 text-blue-800 disabled:opacity-60"
+        className="flex w-full flex-col items-center gap-3 rounded-lg border border-blue-100 bg-white p-6 text-blue-800 shadow-sm disabled:opacity-60"
         type="button"
         disabled={pending}
         onClick={onUpload}

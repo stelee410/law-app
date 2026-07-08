@@ -38,8 +38,8 @@ export function PlanCard({
         ))}
       </div>
       <button
-        className={`mt-4 h-12 w-full rounded-lg font-black ${
-          selected ? 'bg-emerald-100 text-emerald-700' : plan.recommended ? 'bg-blue-600 text-white' : 'bg-slate-950 text-white'
+        className={`mt-4 h-12 w-full rounded-lg font-black shadow-sm ${
+          selected ? 'bg-emerald-100 text-emerald-700' : plan.recommended ? 'bg-blue-600 text-white shadow-blue-100' : 'bg-slate-100 text-slate-800'
         } disabled:opacity-50`}
         type="button"
         disabled={pending || locked}

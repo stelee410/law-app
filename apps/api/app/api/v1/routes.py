@@ -212,6 +212,14 @@ def admin_overview(
   }
 
 
+@router.get("/admin/cases")
+def admin_cases(
+  current_admin: Annotated[User, Depends(_get_current_admin)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  return {"cases": store.list_admin_cases()}
+
+
 @router.get("/messages")
 def messages(
   current_user: Annotated[User, Depends(_get_current_user)],

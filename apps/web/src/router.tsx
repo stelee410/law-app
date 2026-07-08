@@ -1,5 +1,5 @@
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
-import { AdminDashboardPage, AdminLawyersPage, AdminUsersPage } from './routes/AdminPages';
+import { AdminCasesPage, AdminDashboardPage, AdminLawyersPage, AdminUsersPage } from './routes/AdminPages';
 import { AssessmentPage } from './routes/AssessmentPage';
 import { CaseDetailPage } from './routes/CaseDetailPage';
 import { CasesPage } from './routes/CasesPage';
@@ -131,6 +131,12 @@ const adminUsersRoute = createRoute({
   component: AdminUsersPage
 });
 
+const adminCasesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'admin/cases',
+  component: AdminCasesPage
+});
+
 const adminLawyersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'admin/lawyers',
@@ -171,6 +177,7 @@ const routeTree = rootRoute.addChildren([
   lawyerTaskRoute,
   lawyerDocumentRoute,
   adminDashboardRoute,
+  adminCasesRoute,
   adminUsersRoute,
   adminLawyersRoute,
   termsRoute,

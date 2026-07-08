@@ -4,7 +4,7 @@ import type { CaseType } from '../../lib/types';
 
 const features = [
   { type: 'debt_collection', icon: HandCoins, tone: 'bg-blue-50 text-blue-700' },
-  { type: 'lawyer_letter', icon: ScrollText, tone: 'bg-[#f5f4ed] text-[#8a4b36]' },
+  { type: 'lawyer_letter', icon: ScrollText, tone: 'bg-cyan-50 text-cyan-700' },
   { type: 'labor_dispute', icon: UsersRound, tone: 'bg-emerald-50 text-emerald-700' },
   { type: 'rental_dispute', icon: BriefcaseBusiness, tone: 'bg-slate-100 text-slate-700' },
   { type: 'contract_review', icon: FileSearch, tone: 'bg-amber-50 text-amber-700' }

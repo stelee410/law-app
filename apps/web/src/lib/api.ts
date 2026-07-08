@@ -93,6 +93,11 @@ export async function getAdminOverview(): Promise<AdminOverview> {
   return api.get(apiUrl('/admin/overview')).json<AdminOverview>();
 }
 
+export async function getAdminCases(): Promise<LawCase[]> {
+  const response = await api.get(apiUrl('/admin/cases')).json<{ cases: LawCase[] }>();
+  return response.cases;
+}
+
 export async function getAdminUsers(): Promise<User[]> {
   const response = await api.get(apiUrl('/admin/users')).json<{ users: User[] }>();
   return response.users;
@@ -149,7 +154,7 @@ export async function selectCasePlan(caseId: string, planId: PlanId): Promise<La
 
 export async function getMessages(): Promise<NotificationMessage[]> {
   const response = await api.get(apiUrl('/messages')).json<{ messages: NotificationMessage[] }>();
-  return response.messages;
+  return response.messages ?? [];
 }
 
 export async function markMessageRead(messageId: string): Promise<NotificationMessage> {

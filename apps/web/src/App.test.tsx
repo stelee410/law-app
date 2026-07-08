@@ -309,6 +309,9 @@ beforeEach(() => {
       if (url.endsWith('/api/v1/admin/lawyers')) {
         return Promise.resolve(jsonResponse({ lawyers: [pendingLawyer, rejectedLawyer] }));
       }
+      if (url.endsWith('/api/v1/admin/cases')) {
+        return Promise.resolve(jsonResponse({ cases: [testCase] }));
+      }
       if (url.endsWith('/api/v1/admin/overview')) {
         return Promise.resolve(jsonResponse({ summary: { totalUsers: 4, totalCases: 1, pendingLawyers: 1 }, recentCases: [testCase] }));
       }
@@ -665,6 +668,70 @@ describe('App', () => {
 
     await waitFor(() => expect(adminReviewPayload).toEqual({ status: 'approved' }));
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: caseKeys.adminOverview });
+  });
+
+  it('redirects clients away from admin and lawyer route shells', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    await router.navigate({ to: '/admin/lawyers' as never });
+
+    render(<App />);
+
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
+    expect(screen.queryByText('律师审核')).not.toBeInTheDocument();
+
+    await router.navigate({ to: '/lawyer' });
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
+    expect(screen.queryByText('律师工作台')).not.toBeInTheDocument();
+  });
+
+  it('redirects admins away from client workflow route shells', async () => {
+    useAuthStore.getState().setSession({
+      token: 'admin-token',
+      user: testAdmin,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testAdmin);
+    await router.navigate({ to: '/cases/new' });
+
+    render(<App />);
+
+    await waitFor(() => expect(window.location.pathname).toBe('/admin'));
+    expect(screen.queryByText('发起追偿')).not.toBeInTheDocument();
+  });
+
+  it('shows unread message count in the bottom navigation', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.messages, [testMessage]);
+
+    render(<App />);
+
+    expect(await screen.findByLabelText('消息，1 条未读')).toBeInTheDocument();
+  });
+
+  it('renders admin case operations page from admin navigation', async () => {
+    useAuthStore.getState().setSession({
+      token: 'admin-token',
+      user: testAdmin,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testAdmin);
+    await router.navigate({ to: '/admin/cases' as never });
+
+    render(<App />);
+
+    expect(await screen.findByText('案件运营')).toBeInTheDocument();
+    expect(await screen.findByText('测试债务人有限公司')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '案件' })).toBeInTheDocument();
   });
 
   it('renders built-in legal document pages', async () => {

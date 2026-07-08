@@ -42,10 +42,10 @@ export function PlanPage() {
       </header>
 
       {plans.length === 0 && (
-        <section className="rounded-lg bg-white p-5 text-center shadow-sm">
+        <section className="rounded-lg border border-slate-100 bg-white p-5 text-center shadow-sm">
           <ShieldCheck className="mx-auto text-blue-600" size={34} />
           <strong className="mt-3 block">需要先完成 AI 评估</strong>
-          <Link to="/cases/$caseId/assessment" params={{ caseId }} className="mt-4 block h-12 rounded-lg bg-blue-600 pt-3 font-black text-white">
+          <Link to="/cases/$caseId/assessment" params={{ caseId }} className="mt-4 block h-12 rounded-lg bg-blue-600 pt-3 font-black text-white shadow-sm shadow-blue-100">
             前往评估
           </Link>
         </section>
@@ -65,7 +65,7 @@ export function PlanPage() {
         ))}
       </section>
 
-      <section className="rounded-lg bg-white p-4 shadow-sm">
+      <section className="rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
         <h2 className="text-lg font-black">平台保障</h2>
         <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-semibold text-slate-700">
           <span className="flex items-center gap-2 rounded-lg bg-blue-50 p-3 text-blue-700">
@@ -80,7 +80,7 @@ export function PlanPage() {
             <ShieldCheck size={18} />
             资金安全
           </span>
-          <span className="flex items-center gap-2 rounded-lg bg-[#f5f4ed] p-3 text-[#8a4b36]">
+          <span className="flex items-center gap-2 rounded-lg bg-amber-50 p-3 text-amber-800">
             <ShieldCheck size={18} />
             隐私保护
           </span>
@@ -97,7 +97,7 @@ export function PlanPage() {
               <button className="h-12 rounded-lg bg-slate-100 font-black text-slate-700" type="button" disabled={selectPlan.isPending} onClick={() => setPendingPlanId(null)}>
                 再看看
               </button>
-              <button className="h-12 rounded-lg bg-blue-600 font-black text-white disabled:opacity-50" type="button" disabled={selectPlan.isPending} onClick={() => handleSelect(pendingPlan.id)}>
+              <button className="h-12 rounded-lg bg-blue-600 font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="button" disabled={selectPlan.isPending} onClick={() => handleSelect(pendingPlan.id)}>
                 确认选择
               </button>
             </div>

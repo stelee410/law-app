@@ -52,7 +52,7 @@ export function EvidencePage() {
         <h1 className="text-2xl font-black tracking-normal">证据上传</h1>
         <div className="grid grid-cols-4 gap-2">
           {['填写信息', '上传证据', '案件评估', '确认方案'].map((item, index) => (
-            <span className={`rounded-lg px-2 py-2 text-center text-[11px] font-bold ${index <= 1 ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'}`} key={item}>
+            <span className={`rounded-lg px-2 py-2 text-center text-[11px] font-bold ${index <= 1 ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 shadow-sm'}`} key={item}>
               {item}
             </span>
           ))}
@@ -67,8 +67,8 @@ export function EvidencePage() {
         {lawCase.evidence.map((category) => (
           <article
             key={category.id}
-            className={`w-full rounded-lg border p-4 text-left shadow-sm ${
-              categoryId === category.id ? 'border-blue-500 bg-white' : 'border-transparent bg-white'
+            className={`w-full rounded-lg border bg-white p-4 text-left shadow-sm ${
+              categoryId === category.id ? 'border-blue-500' : 'border-slate-100'
             }`}
           >
             <button className="flex w-full items-start gap-3 text-left" type="button" onClick={() => setCategoryId(category.id)}>
@@ -99,7 +99,7 @@ export function EvidencePage() {
         ))}
       </section>
 
-      <section className="rounded-lg bg-white p-4 shadow-sm">
+      <section className="rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
         <SectionHeader title="AI初步识别" subtitle="基于已上传证据生成" />
         <div className="mt-3 space-y-2">
           {(lawCase.assessment?.findings ?? lawCase.evidence.flatMap((item) => item.insight ? [item.insight] : [])).slice(0, 3).map((finding) => (
@@ -120,7 +120,7 @@ export function EvidencePage() {
           <Camera size={18} />
           拍照
         </button>
-        <button className="h-12 rounded-lg bg-blue-600 font-black text-white shadow-lg shadow-blue-200 disabled:opacity-50" type="button" disabled={evaluate.isPending} onClick={handleEvaluate}>
+        <button className="h-12 rounded-lg bg-blue-600 font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="button" disabled={evaluate.isPending} onClick={handleEvaluate}>
           下一步：生成方案
         </button>
       </div>

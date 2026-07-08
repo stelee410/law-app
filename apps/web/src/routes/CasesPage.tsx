@@ -1,6 +1,8 @@
 import { Link } from '@tanstack/react-router';
-import { Plus } from 'lucide-react';
+import { FilePlus2, Plus } from 'lucide-react';
+import { BrandHeader } from '../components/h5/BrandHeader';
 import { CaseCard } from '../components/h5/CaseCard';
+import { EmptyState } from '../components/h5/EmptyState';
 import { MetricCard } from '../components/h5/MetricCard';
 import { SectionHeader } from '../components/h5/SectionHeader';
 import { StateBlock } from '../components/StateBlock';
@@ -14,12 +16,12 @@ export function CasesPage() {
 
   return (
     <div className="space-y-5">
-      <header className="space-y-3">
-        <SectionHeader
+      <header className="space-y-4">
+        <BrandHeader
           title="案件"
-          subtitle="所有追偿案件、证据进度和服务状态统一归档"
+          description="所有追偿案件、证据进度和服务状态统一归档"
           action={
-            <Link to="/cases/new" className="flex h-9 items-center gap-1 rounded-lg bg-blue-600 px-3 text-sm font-black text-white">
+            <Link to="/cases/new" className="flex h-10 items-center gap-1 rounded-lg bg-blue-600 px-3 text-sm font-black text-white shadow-sm shadow-blue-100">
               <Plus size={16} />
               新建
             </Link>
@@ -39,13 +41,16 @@ export function CasesPage() {
         </section>
       )}
       {!casesQuery.isPending && !casesQuery.isError && cases.length === 0 && (
-        <section className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center">
-          <strong className="block text-lg">暂无案件</strong>
-          <span className="mt-2 block text-sm leading-6 text-slate-500">你发起的追偿案件会统一归档在这里。</span>
-          <Link to="/cases/new" className="mt-4 inline-flex h-11 items-center rounded-lg bg-blue-600 px-4 font-black text-white">
-            发起追偿
-          </Link>
-        </section>
+        <EmptyState
+          icon={<FilePlus2 size={24} />}
+          title="暂无案件"
+          description="你发起的追偿案件会统一归档在这里。"
+          action={
+            <Link to="/cases/new" className="inline-flex h-11 items-center rounded-lg bg-blue-600 px-4 font-black text-white">
+              发起追偿
+            </Link>
+          }
+        />
       )}
       {!casesQuery.isError && cases.length > 0 && (
         <section className="space-y-3">

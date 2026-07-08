@@ -86,7 +86,7 @@ export function LawyerTaskPage() {
         返回律师工作台
       </Link>
 
-      <section className="rounded-lg bg-white p-4 shadow-sm">
+      <section className="rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <span className="min-w-0">
             <p className="text-sm font-bold text-blue-700">{lawCase.caseNo}</p>
@@ -99,7 +99,7 @@ export function LawyerTaskPage() {
         <p className="mt-3 text-sm leading-6 text-slate-500">{task.summary}</p>
       </section>
 
-      <section className="rounded-lg bg-white p-4 shadow-sm">
+      <section className="rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
         <SectionHeader title="案件资料" subtitle="律师复核前需核对事实、证据和 AI 评估" />
         <div className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
           <p><b>相对方：</b>{lawCase.counterpartyName || lawCase.debtorName}</p>
@@ -109,7 +109,7 @@ export function LawyerTaskPage() {
         </div>
       </section>
 
-      <section className="rounded-lg bg-white p-4 shadow-sm">
+      <section className="rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
         <SectionHeader title="证据材料" subtitle="判断是否需要补证" />
         <div className="mt-3 space-y-2">
           {lawCase.evidence.map((item) => (
@@ -141,7 +141,7 @@ export function LawyerTaskPage() {
         {evidenceOpenError && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">{evidenceOpenError}</p>}
       </section>
 
-      <form className="space-y-3 rounded-lg bg-white p-4 shadow-sm" onSubmit={handleReview}>
+      <form className="space-y-3 rounded-lg border border-slate-100 bg-white p-4 shadow-sm" onSubmit={handleReview}>
         <SectionHeader title="复核意见" subtitle="提交后用户端会收到通知" />
         <textarea className="min-h-20 w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm outline-none focus:border-blue-500 focus:bg-white" value={conclusion} onChange={(event) => setConclusion(event.target.value)} />
         <select className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value={riskLevel} onChange={(event) => setRiskLevel(event.target.value as RiskLevel)}>
@@ -154,7 +154,7 @@ export function LawyerTaskPage() {
         <select className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value={nextAction} onChange={(event) => setNextAction(event.target.value as ReviewNextAction)}>
           {nextActionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
-        <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white disabled:opacity-50" type="submit" disabled={submitReview.isPending || task.status === 'completed'}>
+        <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="submit" disabled={submitReview.isPending || task.status === 'completed'}>
           <CheckCircle2 size={18} />
           {task.status === 'completed' ? '复核已提交' : '提交复核意见'}
         </button>
@@ -167,7 +167,7 @@ export function LawyerTaskPage() {
           action={<Link to="/lawyer/cases/$caseId/documents/$documentId" params={{ caseId: lawCase.id, documentId: 'new' }} className="text-sm font-bold text-blue-700">新增</Link>}
         />
         {documents.map((document) => (
-          <div key={document.id} className="rounded-lg bg-white p-4 shadow-sm">
+          <div key={document.id} className="rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <span className="min-w-0">
                 <strong className="block break-words">{document.title}</strong>
@@ -177,7 +177,7 @@ export function LawyerTaskPage() {
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-bold">
               <Link to="/lawyer/cases/$caseId/documents/$documentId" params={{ caseId: lawCase.id, documentId: document.id }} className="rounded-lg bg-slate-100 px-3 py-2 text-center">编辑</Link>
-              <button className="flex items-center justify-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-white disabled:opacity-50" type="button" disabled={submitDocument.isPending || document.status !== 'draft'} onClick={() => submitDocument.mutate(document.id)}>
+              <button className="flex items-center justify-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="button" disabled={submitDocument.isPending || document.status !== 'draft'} onClick={() => submitDocument.mutate(document.id)}>
                 <Send size={15} />
                 提交用户
               </button>

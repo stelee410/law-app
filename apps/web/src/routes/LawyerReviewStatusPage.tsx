@@ -32,7 +32,7 @@ export function LawyerReviewStatusPage() {
           {user.rejectedReason}
         </div>
       )}
-      <Link className="mx-auto rounded-lg bg-slate-900 px-5 py-3 text-sm font-black text-white" to="/me">
+      <Link className="mx-auto rounded-lg bg-white px-5 py-3 text-sm font-black text-slate-800 shadow-sm" to="/me">
         查看账号
       </Link>
       <button className="mx-auto flex h-11 items-center justify-center gap-2 rounded-lg bg-red-50 px-5 text-sm font-black text-red-700" type="button" onClick={handleLogout}>

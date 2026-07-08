@@ -5,6 +5,7 @@ import {
   createLawyerDocument,
   createLawCase,
   evaluateCase,
+  getAdminCases,
   getAdminLawyerApplications,
   getAdminOverview,
   getAdminUsers,
@@ -55,6 +56,7 @@ export const caseKeys = {
   lawyerTask: (taskId: string) => ['lawyer', 'tasks', taskId] as const,
   lawyerDocuments: (caseId: string) => ['lawyer', 'cases', caseId, 'documents'] as const,
   adminOverview: ['admin', 'overview'] as const,
+  adminCases: ['admin', 'cases'] as const,
   adminUsers: ['admin', 'users'] as const,
   adminLawyers: ['admin', 'lawyers'] as const
 };
@@ -153,6 +155,16 @@ export function useAdminOverviewQuery() {
   return useQuery({
     queryKey: caseKeys.adminOverview,
     queryFn: getAdminOverview,
+    enabled: Boolean(token && user?.role === 'admin')
+  });
+}
+
+export function useAdminCasesQuery() {
+  const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
+  return useQuery({
+    queryKey: caseKeys.adminCases,
+    queryFn: getAdminCases,
     enabled: Boolean(token && user?.role === 'admin')
   });
 }

@@ -88,7 +88,7 @@ export function LawyerDocumentEditorPage() {
         返回律师工作台
       </Link>
 
-      <form className="space-y-4 rounded-lg bg-white p-4 shadow-sm" onSubmit={handleSubmit}>
+      <form className="space-y-4 rounded-lg border border-slate-100 bg-white p-4 shadow-sm" onSubmit={handleSubmit}>
         <div className="flex items-start justify-between gap-3">
           <SectionHeader title={isNew ? '新增法律文书' : '编辑法律文书'} subtitle="结构化字段用于生成和审查，正文保留律师可编辑空间" />
           {!isNew && document && (
@@ -130,7 +130,7 @@ export function LawyerDocumentEditorPage() {
           <span className="mb-2 block text-sm font-semibold text-slate-700">正文</span>
           <textarea className="min-h-56 w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-6 outline-none focus:border-blue-500 focus:bg-white disabled:text-slate-500" value={body} onChange={(event) => setBody(event.target.value)} disabled={readOnly} />
         </label>
-        <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white disabled:opacity-50" type="submit" disabled={createDocument.isPending || updateDocument.isPending || !isDraft}>
+        <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="submit" disabled={createDocument.isPending || updateDocument.isPending || !isDraft}>
           <Save size={18} />
           保存文书
         </button>
@@ -142,7 +142,7 @@ export function LawyerDocumentEditorPage() {
             <Archive size={18} />
             归档
           </button>
-          <button className="flex h-12 items-center justify-center gap-2 rounded-lg bg-slate-950 font-bold text-white shadow-sm disabled:opacity-50" type="button" disabled={submitDocument.isPending || !isDraft} onClick={handleSend}>
+          <button className="flex h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 font-bold text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="button" disabled={submitDocument.isPending || !isDraft} onClick={handleSend}>
             <Send size={18} />
             提交用户
           </button>
