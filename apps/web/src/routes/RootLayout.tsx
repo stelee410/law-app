@@ -2,7 +2,6 @@ import { Outlet, useLocation, useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { BottomNav } from '../components/h5/BottomNav';
-import { StatusBar } from '../components/h5/StatusBar';
 import { useMeQuery } from '../hooks/useCaseQueries';
 import { useAuthStore } from '../state/authStore';
 
@@ -55,7 +54,6 @@ export function RootLayout() {
   return (
     <main className="min-h-dvh bg-[#eef2f7] px-3 py-3 text-slate-950">
       <section className="phone-shell mx-auto flex min-h-[calc(100dvh-1.5rem)] w-full max-w-[430px] flex-col overflow-hidden border border-white/80 bg-slate-50 shadow-2xl">
-        <StatusBar />
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-28 pt-3">
           {needsAuthRedirect || isRestoring ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">

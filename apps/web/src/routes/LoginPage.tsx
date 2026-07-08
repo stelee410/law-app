@@ -1,11 +1,11 @@
 import { Link, useNavigate } from '@tanstack/react-router';
 import { ShieldCheck, Smartphone, UserPlus } from 'lucide-react';
 import { FormEvent, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import brandLogo from '../assets/brand-logo.png';
+import loginHero from '../assets/login-hero.png';
 import { useLoginMutation, useRequestCodeMutation } from '../hooks/useCaseQueries';
 
 export function LoginPage() {
-  const { t } = useTranslation();
   const navigate = useNavigate();
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
@@ -28,21 +28,17 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col justify-between gap-8 py-6">
-      <section className="space-y-5">
+    <div className="flex flex-1 flex-col gap-4 py-4">
+      <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <span className="grid size-14 place-items-center rounded-lg bg-blue-600 text-xl font-black text-white shadow-lg shadow-blue-200">
-            律
-          </span>
+          <div className="flex items-center gap-3" aria-label="法灵 AI">
+            <img className="size-14 rounded-xl object-cover shadow-lg shadow-blue-200" src={brandLogo} alt="法灵 AI 品牌标识" loading="eager" />
+            <span className="text-base font-black text-blue-700">法灵 AI</span>
+          </div>
           <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
             <ShieldCheck className="mr-1 inline" size={14} />
             隐私保护
           </span>
-        </div>
-        <div>
-          <p className="text-sm font-semibold text-blue-700">{t('appName')}</p>
-          <h1 className="mt-2 text-3xl font-black tracking-normal text-slate-950">{t('loginTitle')}</h1>
-          <p className="mt-3 text-sm leading-6 text-slate-500">登录后继续管理案件、证据、AI评估和服务方案。</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <Link className="flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-3 text-sm font-bold text-blue-700 shadow-sm" to="/register/client">
@@ -65,6 +61,13 @@ export function LoginPage() {
           </div>
         )}
       </section>
+
+      <img
+        className="h-32 w-full rounded-lg object-cover object-center shadow-sm shadow-blue-100"
+        src={loginHero}
+        alt="法律服务安全协作插图"
+        loading="eager"
+      />
 
       <form className="space-y-4 rounded-lg border border-white bg-white p-4 shadow-xl shadow-slate-200/70" onSubmit={handleSubmit}>
         <label className="block">

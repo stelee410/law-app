@@ -450,9 +450,14 @@ describe('App', () => {
     render(<App />);
 
     await waitFor(() => expect(window.location.pathname).toBe('/login'));
-    expect(await screen.findByText('手机号验证码登录')).toBeInTheDocument();
     expect(await screen.findByRole('link', { name: '客户注册' })).toBeInTheDocument();
     expect(await screen.findByRole('link', { name: '律师入驻' })).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: '法灵 AI 品牌标识' })).toBeInTheDocument();
+    expect(screen.queryByText('手机号验证码登录')).not.toBeInTheDocument();
+    expect(screen.queryByText('登录后继续管理案件、证据、AI评估和服务方案。')).not.toBeInTheDocument();
+    expect(screen.queryByText('9:41')).not.toBeInTheDocument();
+    expect(screen.queryByText('5G')).not.toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: '法律服务安全协作插图' })).toBeInTheDocument();
     expect(screen.queryByText('客户演示')).not.toBeInTheDocument();
     expect(screen.queryByText('律师演示')).not.toBeInTheDocument();
   });
@@ -479,6 +484,33 @@ describe('App', () => {
     expect(submit).toBeDisabled();
     await user.click(privacy);
     expect(submit).toBeEnabled();
+  });
+
+  it('opens registration legal links from explicit view actions', async () => {
+    const user = userEvent.setup();
+    await router.navigate({ to: '/register/client' });
+
+    render(<App />);
+
+    const terms = await screen.findByLabelText(/服务协议/);
+    const privacy = await screen.findByLabelText(/隐私政策/);
+    expect(await screen.findByRole('link', { name: '查看服务协议' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '查看隐私政策' })).toBeInTheDocument();
+    expect(terms).not.toBeChecked();
+    expect(privacy).not.toBeChecked();
+
+    await user.click(screen.getByRole('link', { name: '查看服务协议' }));
+    await waitFor(() => expect(window.location.pathname).toBe('/legal/terms'));
+    expect(await screen.findByText('服务协议')).toBeInTheDocument();
+
+    await router.navigate({ to: '/register/client' });
+    expect(await screen.findByRole('link', { name: '查看隐私政策' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/服务协议/)).not.toBeChecked();
+    expect(screen.getByLabelText(/隐私政策/)).not.toBeChecked();
+
+    await user.click(screen.getByRole('link', { name: '查看隐私政策' }));
+    await waitFor(() => expect(window.location.pathname).toBe('/legal/privacy'));
+    expect(await screen.findByText('隐私政策')).toBeInTheDocument();
   });
 
   it('submits lawyer onboarding and routes pending lawyers to review status', async () => {

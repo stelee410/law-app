@@ -167,24 +167,24 @@ function TextField({ label, value, onChange, placeholder, inputMode }: { label: 
 function ConsentFields({ consent, setConsent }: { consent: ConsentState; setConsent: (value: ConsentState) => void }) {
   return (
     <div className="space-y-3">
-      <label className="flex gap-3 rounded-lg bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-700">
-        <input className="mt-1 size-4 shrink-0 accent-blue-600" type="checkbox" checked={consent.acceptedTerms} onChange={(event) => setConsent({ ...consent, acceptedTerms: event.target.checked })} />
-        <span>
-          我已阅读并同意
-          <Link className="font-black text-blue-700" to="/legal/terms" onClick={(event) => event.stopPropagation()}>
-            服务协议
-          </Link>
-        </span>
-      </label>
-      <label className="flex gap-3 rounded-lg bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-700">
-        <input className="mt-1 size-4 shrink-0 accent-blue-600" type="checkbox" checked={consent.acceptedPrivacy} onChange={(event) => setConsent({ ...consent, acceptedPrivacy: event.target.checked })} />
-        <span>
-          我已阅读并同意
-          <Link className="font-black text-blue-700" to="/legal/privacy" onClick={(event) => event.stopPropagation()}>
-            隐私政策
-          </Link>
-        </span>
-      </label>
+      <div className="rounded-lg bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-700">
+        <label className="flex gap-3">
+          <input className="mt-1 size-4 shrink-0 accent-blue-600" type="checkbox" checked={consent.acceptedTerms} onChange={(event) => setConsent({ ...consent, acceptedTerms: event.target.checked })} />
+          <span>我已阅读并同意服务协议</span>
+        </label>
+        <Link className="mt-2 inline-flex font-black text-blue-700" to="/legal/terms">
+          查看服务协议
+        </Link>
+      </div>
+      <div className="rounded-lg bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-700">
+        <label className="flex gap-3">
+          <input className="mt-1 size-4 shrink-0 accent-blue-600" type="checkbox" checked={consent.acceptedPrivacy} onChange={(event) => setConsent({ ...consent, acceptedPrivacy: event.target.checked })} />
+          <span>我已阅读并同意隐私政策</span>
+        </label>
+        <Link className="mt-2 inline-flex font-black text-blue-700" to="/legal/privacy">
+          查看隐私政策
+        </Link>
+      </div>
     </div>
   );
 }
