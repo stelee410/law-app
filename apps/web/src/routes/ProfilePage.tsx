@@ -15,6 +15,12 @@ export function ProfilePage() {
   const logout = useAuthStore((state) => state.logout);
   const casesQuery = useCasesQuery();
   const dashboard = deriveDashboard(casesQuery.data ?? []);
+  const returnAction =
+    user?.role === 'lawyer'
+      ? { to: '/lawyer' as const, label: '返回律师工作台' }
+      : user?.role === 'admin'
+        ? { to: '/admin' as const, label: '返回管理后台' }
+        : { to: '/cases' as const, label: '返回案件列表' };
 
   async function handleLogout() {
     logout();
@@ -53,8 +59,8 @@ export function ProfilePage() {
         </div>
       </section>
 
-      <Link to="/cases" className="block h-12 rounded-lg bg-slate-950 pt-3 text-center font-black text-white">
-        返回案件列表
+      <Link to={returnAction.to} className="block h-12 rounded-lg border border-slate-200 bg-white pt-3 text-center font-black text-slate-700 shadow-sm">
+        {returnAction.label}
       </Link>
       <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-red-50 font-black text-red-700" type="button" onClick={handleLogout}>
         <LogOut size={18} />

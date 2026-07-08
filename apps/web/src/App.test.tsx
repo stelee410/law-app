@@ -828,6 +828,24 @@ describe('App', () => {
     expect(await screen.findByText('律师复核待办')).toBeInTheDocument();
   });
 
+  it('renders role-aware profile return action for lawyers', async () => {
+    useAuthStore.getState().setSession({
+      token: 'lawyer-token',
+      user: testLawyer,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testLawyer);
+    queryClient.setQueryData(caseKeys.lists, []);
+    await router.navigate({ to: '/me' });
+
+    render(<App />);
+
+    const returnLink = await screen.findByRole('link', { name: '返回律师工作台' });
+    expect(returnLink).toHaveAttribute('href', '/lawyer');
+    expect(returnLink).not.toHaveClass('bg-slate-950');
+    expect(screen.queryByRole('link', { name: '返回案件列表' })).not.toBeInTheDocument();
+  });
+
   it('requests lawyer case documents through lawyer endpoint', async () => {
     const getSpy = vi.spyOn(apiModule.api, 'get').mockReturnValue({
       json: async () => ({ documents: [lawyerDocument] })
