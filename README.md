@@ -67,7 +67,7 @@ package.json           # 根开发、测试、构建脚本
 ### 第一步：安装依赖
 
 ```bash
-# 前端 workspace 与根脚本依赖
+# 必须在仓库根目录执行；会安装根脚本依赖与 apps/web workspace 依赖
 pnpm install
 
 # 后端 Python 依赖；会使用 apps/api/pyproject.toml，并创建/同步 apps/api/.venv
@@ -75,8 +75,9 @@ uv sync --directory apps/api --project .
 ```
 
 不要在根目录裸跑 `uv sync`。根目录不是 Python 后端项目，后端唯一 Python 项目在 `apps/api`。
-也不需要在 `apps/web` 单独维护另一套 pnpm 安装入口；根目录 `pnpm install` 会按
-`pnpm-workspace.yaml` 安装 `apps/web` 依赖。
+也不要在 `apps/web` 单独维护另一套 pnpm workspace；根目录 `pnpm install` 会按
+`pnpm-workspace.yaml` 安装 `apps/web` 依赖。如果当前 shell 已经在子目录，先回到根目录，
+或显式执行 `pnpm --dir D:\law-app install`。
 
 ### 依赖目录边界
 

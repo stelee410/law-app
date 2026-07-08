@@ -13,7 +13,7 @@ This repository is a full-stack mobile H5 legal case workflow scaffold. The root
 Install dependencies before local work:
 
 - `uv sync --directory apps/api --project .`: sync backend dependencies.
-- `pnpm install`: install root and web workspace dependencies.
+- `pnpm install`: run from the repository root to install root and web workspace dependencies; do not keep a nested `apps/web/pnpm-workspace.yaml`.
 - `pnpm dev`: run FastAPI on `:4000` and Vite on `:5173`.
 - `pnpm test`: run backend pytest, then web Vitest.
 - `pnpm typecheck`: run web TypeScript checks.
