@@ -1,10 +1,10 @@
 import { Link } from '@tanstack/react-router';
 import { BadgeCheck, CheckCircle2, Headphones, ShieldCheck } from 'lucide-react';
 import { formatMoney } from '../../lib/format';
-import type { AssessmentResult } from '../../lib/types';
+import type { AssessmentResult, PlanId } from '../../lib/types';
 import { MetricCard } from './MetricCard';
 
-export function AssessmentSummary({ assessment, caseId }: { assessment: AssessmentResult; caseId: string }) {
+export function AssessmentSummary({ assessment, caseId, selectedPlan }: { assessment: AssessmentResult; caseId: string; selectedPlan?: PlanId }) {
   return (
     <div className="space-y-4">
       <section className="rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
@@ -66,13 +66,23 @@ export function AssessmentSummary({ assessment, caseId }: { assessment: Assessme
         </div>
       </section>
 
-      <Link
-        to="/cases/$caseId/plans"
-        params={{ caseId }}
-        className="block h-12 rounded-lg bg-blue-600 pt-3 text-center font-black text-white shadow-sm shadow-blue-100"
-      >
-        选择服务方案
-      </Link>
+      {selectedPlan ? (
+        <Link
+          to="/cases/$caseId"
+          params={{ caseId }}
+          className="block h-12 rounded-lg bg-emerald-100 pt-3 text-center font-black text-emerald-700"
+        >
+          已选择服务方案
+        </Link>
+      ) : (
+        <Link
+          to="/cases/$caseId/plans"
+          params={{ caseId }}
+          className="block h-12 rounded-lg bg-blue-600 pt-3 text-center font-black text-white shadow-sm shadow-blue-100"
+        >
+          选择服务方案
+        </Link>
+      )}
     </div>
   );
 }

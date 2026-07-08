@@ -421,6 +421,8 @@ class InMemoryStore:
     law_case = self.get_case(user_id, case_id)
     if law_case is None:
       return None
+    if law_case.selectedPlan is not None:
+      raise InvalidStateError("PLAN_ALREADY_SELECTED")
     _require_required_evidence(law_case)
     return self._run_assessment(law_case)
 
@@ -1263,6 +1265,8 @@ class PostgresStore:
     law_case = self.get_case(user_id, case_id)
     if law_case is None:
       return None
+    if law_case.selectedPlan is not None:
+      raise InvalidStateError("PLAN_ALREADY_SELECTED")
     _require_required_evidence(law_case)
     created_at = _now()
     job_id = f"job-{uuid4().hex[:8]}"

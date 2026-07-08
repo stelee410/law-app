@@ -369,6 +369,17 @@ def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
   assert "event: document.updated" in event_body
   assert "event: task.updated" in event_body
 
+  reevaluated = client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers)
+  assert reevaluated.status_code == 409
+  assert reevaluated.json()["detail"] == "PLAN_ALREADY_SELECTED"
+  current_case = client.get(f"/api/v1/cases/{case_id}", headers=client_headers).json()["case"]
+  assert current_case["selectedPlan"] == "self-service"
+  assert current_case["status"].startswith("AI自助处理完成：")
+  current_letter_stage = next(stage for stage in current_case["stages"] if stage["key"] == "letter")
+  current_active_stage = next(stage for stage in current_case["stages"] if stage["status"] == "active")
+  assert current_letter_stage["status"] == "done"
+  assert current_active_stage["key"] == "negotiation"
+
   selected_again = client.post(
     f"/api/v1/cases/{case_id}/plan",
     headers=client_headers,

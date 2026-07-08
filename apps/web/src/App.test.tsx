@@ -895,6 +895,23 @@ describe('App', () => {
     expect(await screen.findByText('法灵平台保障')).toBeInTheDocument();
   });
 
+  it('hides the plan entry after a service plan is selected', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), { ...assessedCase, selectedPlan: 'self-service' });
+    await router.navigate({ to: '/cases/$caseId/assessment', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('案件胜率参考')).toBeInTheDocument();
+    expect(await screen.findByText('已选择服务方案')).toBeInTheDocument();
+    expect(screen.queryByText('选择服务方案')).not.toBeInTheDocument();
+  });
+
   it('shows missing required evidence before an assessment is treated as complete', async () => {
     useAuthStore.getState().setSession({
       token: 'test-token',

@@ -75,7 +75,7 @@ export function AssessmentPage() {
             {hasMissingRequiredEvidence ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
             {hasMissingRequiredEvidence ? '关键材料缺失，已生成初步评估' : '证据已上传，AI评估完成'}
           </div>
-          <AssessmentSummary assessment={assessment} caseId={caseId} />
+          <AssessmentSummary assessment={assessment} caseId={caseId} selectedPlan={lawCase.selectedPlan} />
         </>
       )}
     </div>
