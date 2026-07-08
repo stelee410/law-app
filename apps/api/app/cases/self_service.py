@@ -33,8 +33,10 @@ class _SelfServiceTemplate:
   next_step: str
   review_title: str | None
   review_description: str
-  active_stage_title: str | None
-  active_stage_description: str
+  document_stage_title: str | None
+  document_stage_description: str
+  next_active_stage_key: str | None
+  next_active_stage_description: str | None
   todo_stage_notes: tuple[tuple[str, str], ...] = ()
 
 
@@ -46,8 +48,10 @@ _TEMPLATES: dict[CaseType, _SelfServiceTemplate] = {
     next_step="查看催收函草稿，按建议发送催告并跟进对方回应",
     review_title="AI自助处理",
     review_description="AI已生成催收函草稿与追偿行动建议",
-    active_stage_title=None,
-    active_stage_description="可参考AI催收函草稿发送催告，跟进对方回应",
+    document_stage_title=None,
+    document_stage_description="AI已生成催收函草稿，可参考草稿发送催告",
+    next_active_stage_key="negotiation",
+    next_active_stage_description="跟进对方回应，保留送达、沟通和履行记录",
   ),
   "lawyer_letter": _SelfServiceTemplate(
     document_type="lawyer_letter",
@@ -56,8 +60,10 @@ _TEMPLATES: dict[CaseType, _SelfServiceTemplate] = {
     next_step="核对函件事实与措辞，确认发送方式与收函方信息",
     review_title=None,
     review_description="AI已生成律师函草稿",
-    active_stage_title="发送准备",
-    active_stage_description="自助确认函件内容与发送方式；如需律师署名可升级服务",
+    document_stage_title="发送准备",
+    document_stage_description="AI已生成律师函草稿，发送前请自助核对内容",
+    next_active_stage_key="negotiation",
+    next_active_stage_description="确认发函方式与收函方信息；如需律师署名可升级服务",
   ),
   "labor_dispute": _SelfServiceTemplate(
     document_type="arbitration_material",
@@ -66,8 +72,10 @@ _TEMPLATES: dict[CaseType, _SelfServiceTemplate] = {
     next_step="按建议整理仲裁申请材料并核对仲裁时效",
     review_title=None,
     review_description="AI已生成仲裁请求建议",
-    active_stage_title=None,
-    active_stage_description="按AI建议整理仲裁申请材料",
+    document_stage_title=None,
+    document_stage_description="AI已生成仲裁申请材料建议",
+    next_active_stage_key="filing",
+    next_active_stage_description="按AI建议准备劳动仲裁立案材料",
   ),
   "rental_dispute": _SelfServiceTemplate(
     document_type="lawyer_letter",
@@ -76,8 +84,10 @@ _TEMPLATES: dict[CaseType, _SelfServiceTemplate] = {
     next_step="查看协商函草稿，与对方协商或按建议准备起诉材料",
     review_title=None,
     review_description="AI已生成协商函草稿与处理建议",
-    active_stage_title=None,
-    active_stage_description="可参考AI协商函草稿与对方沟通",
+    document_stage_title=None,
+    document_stage_description="AI已生成协商函草稿，可参考草稿与对方沟通",
+    next_active_stage_key="negotiation",
+    next_active_stage_description="跟进双方协商与调解结果",
   ),
   "contract_review": _SelfServiceTemplate(
     document_type="contract_review_opinion",
@@ -86,8 +96,10 @@ _TEMPLATES: dict[CaseType, _SelfServiceTemplate] = {
     next_step="按审查意见核对风险条款并确认修改点",
     review_title=None,
     review_description="AI已生成合同审查意见",
-    active_stage_title=None,
-    active_stage_description="按AI审查意见核对修改条款",
+    document_stage_title=None,
+    document_stage_description="AI已生成合同审查意见和修改建议",
+    next_active_stage_key="filing",
+    next_active_stage_description="确认修改版和谈判要点",
     todo_stage_notes=(("negotiation", "如需可升级律师精审关键条款"),),
   ),
 }
@@ -127,9 +139,14 @@ def apply_self_service_outcome(law_case: LawCase, payload: SelfServicePayload, c
       stage.status = "done"
       stage.at = completed_at
     elif stage.key == "letter":
-      if template.active_stage_title is not None:
-        stage.title = template.active_stage_title
-      stage.description = template.active_stage_description
+      if template.document_stage_title is not None:
+        stage.title = template.document_stage_title
+      stage.description = template.document_stage_description
+      stage.status = "done"
+      stage.at = completed_at
+    elif stage.key == template.next_active_stage_key:
+      if template.next_active_stage_description is not None:
+        stage.description = template.next_active_stage_description
       stage.status = "active"
   for stage_key, note in template.todo_stage_notes:
     stage = next((item for item in law_case.stages if item.key == stage_key), None)

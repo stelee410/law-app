@@ -324,8 +324,12 @@ def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
   assert selected_case["status"].startswith("AI自助处理完成：")
   assert "律师复核" not in selected_case["status"]
   review_stage = next(stage for stage in selected_case["stages"] if stage["key"] == "review")
+  letter_stage = next(stage for stage in selected_case["stages"] if stage["key"] == "letter")
   active_stage = next(stage for stage in selected_case["stages"] if stage["status"] == "active")
   assert review_stage["status"] == "done"
+  assert letter_stage["status"] == "done"
+  assert active_stage["key"] == "negotiation"
+  assert active_stage["key"] != "letter"
   assert "律师复核" not in active_stage["title"]
 
   work_items = client.get(f"/api/v1/cases/{case_id}/work-items", headers=client_headers)

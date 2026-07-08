@@ -281,7 +281,14 @@ const selfServiceCase = {
     {
       key: 'letter',
       title: '发送律师函',
-      description: '可参考AI催收函草稿发送催告，跟进对方回应',
+      description: 'AI已生成催收函草稿，可参考草稿发送催告',
+      status: 'done',
+      at: '2026-06-03'
+    },
+    {
+      key: 'negotiation',
+      title: '协商调解',
+      description: '跟进对方回应，保留送达、沟通和履行记录',
       status: 'active'
     }
   ]
@@ -1236,6 +1243,8 @@ describe('App', () => {
     expect(await screen.findByText('已完成')).toBeInTheDocument();
     expect(await screen.findByText('待处理')).toBeInTheDocument();
     expect(screen.queryByText('处理中')).not.toBeInTheDocument();
+    expect((await screen.findByText('发送律师函')).parentElement).not.toHaveTextContent('进行中');
+    expect((await screen.findByText('协商调解')).parentElement).toHaveTextContent('进行中');
     expect(await screen.findByText('致测试债务人有限公司的催收函（AI草稿）')).toBeInTheDocument();
     expect(await screen.findByText('AI生成')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '确认文书并进入下一阶段' })).not.toBeInTheDocument();
