@@ -169,16 +169,22 @@ export function AdminLawyersPage() {
               <div>擅长领域：{lawyer.specialties.join('、') || '未填写'}</div>
               <div>审核状态：{reviewLabel(lawyer.lawyerReviewStatus)}</div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button className="flex items-center justify-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700" type="button" onClick={() => reviewLawyer.mutate({ userId: lawyer.id, input: { status: 'approved' } })}>
-                <CheckCircle2 size={16} />
-                通过
-              </button>
-              <button className="flex items-center justify-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-black text-red-700" type="button" onClick={() => reviewLawyer.mutate({ userId: lawyer.id, input: { status: 'rejected', rejectedReason: reason } })}>
-                <XCircle size={16} />
-                拒绝
-              </button>
-            </div>
+            {lawyer.lawyerReviewStatus === 'pending_review' ? (
+              <div className="grid grid-cols-2 gap-2">
+                <button className="flex items-center justify-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700 disabled:opacity-50" type="button" disabled={reviewLawyer.isPending} onClick={() => reviewLawyer.mutate({ userId: lawyer.id, input: { status: 'approved' } })}>
+                  <CheckCircle2 size={16} />
+                  通过
+                </button>
+                <button className="flex items-center justify-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-black text-red-700 disabled:opacity-50" type="button" disabled={reviewLawyer.isPending} onClick={() => reviewLawyer.mutate({ userId: lawyer.id, input: { status: 'rejected', rejectedReason: reason } })}>
+                  <XCircle size={16} />
+                  拒绝
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-black text-slate-600">
+                审核已完成
+              </div>
+            )}
           </article>
         ))}
       </section>
