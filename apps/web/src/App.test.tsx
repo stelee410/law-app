@@ -3,6 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { caseKeys } from './hooks/useCaseQueries';
+import { api, apiUrl, resolveApiBaseUrl } from './lib/api';
 import { queryClient } from './lib/queryClient';
 import { router } from './router';
 import { useAuthStore } from './state/authStore';
@@ -125,6 +126,30 @@ afterEach(() => {
 });
 
 describe('App', () => {
+  it('uses a configurable API base with the dev proxy fallback', () => {
+    expect(resolveApiBaseUrl(undefined)).toBe('/api/v1');
+    expect(resolveApiBaseUrl('')).toBe('/api/v1');
+    expect(resolveApiBaseUrl(' https://demo.example.com/api/v1/ ')).toBe('https://demo.example.com/api/v1');
+    expect(apiUrl('/health')).toBe('/api/v1/health');
+    expect(apiUrl('health')).toBe('/api/v1/health');
+  });
+
+  it('attaches the bearer token to API requests', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+
+    await api.get('http://localhost/api/v1/cases').json<{ cases: unknown[] }>();
+
+    const fetchMock = vi.mocked(fetch);
+    const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    const [input, init] = lastCall;
+    const headers = input instanceof Request ? input.headers : new Headers(init?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer test-token');
+  });
+
   it('renders the mobile home for authenticated users', async () => {
     useAuthStore.getState().setSession({
       token: 'test-token',

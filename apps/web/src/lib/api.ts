@@ -4,19 +4,28 @@ import type {
   AuthToken,
   CaseEvent,
   CreateCaseInput,
+  HealthResponse,
   LawCase,
   OtpResponse,
   PlanId,
   User
 } from './types';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
+const DEFAULT_API_BASE_URL = '/api/v1';
+
+export function resolveApiBaseUrl(value: string | undefined) {
+  const configured = value?.trim();
+  if (!configured) return DEFAULT_API_BASE_URL;
+  return configured.replace(/\/+$/, '') || '/';
+}
+
+export const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
 
 export const api = ky.create({
   timeout: 30000,
   hooks: {
     beforeRequest: [
-      (request) => {
+      ({ request }) => {
         const token = useAuthStore.getState().token;
         if (token) {
           request.headers.set('Authorization', `Bearer ${token}`);
@@ -27,9 +36,13 @@ export const api = ky.create({
 });
 
 export function apiUrl(path: string) {
-  const normalizedBase = API_BASE_URL.replace(/\/$/, '');
+  const normalizedBase = API_BASE_URL === '/' ? '' : API_BASE_URL.replace(/\/$/, '');
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   return `${normalizedBase}${normalizedPath}`;
+}
+
+export async function getHealth(): Promise<HealthResponse> {
+  return api.get(apiUrl('/health')).json<HealthResponse>();
 }
 
 export async function requestLoginCode(phone: string): Promise<OtpResponse> {

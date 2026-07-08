@@ -4,11 +4,38 @@ services:
       context: .
       target: api
     environment:
-      APP_ENV: development
-      PROJECT_NAME: law-app
-      API_V1_STR: /api/v1
-      ALLOWED_ORIGINS: "http://localhost:5173,http://localhost:8080"
-      MOCK_OTP_CODE: 123456
+      APP_ENV: ${APP_ENV:-development}
+      PROJECT_NAME: ${PROJECT_NAME:-law-app}
+      VERSION: ${VERSION:-0.1.0}
+      DEBUG: ${DEBUG:-true}
+      API_V1_STR: ${API_V1_STR:-/api/v1}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:8080}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-memory}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/app/uploads}
+      MOCK_OTP_CODE: ${MOCK_OTP_CODE:-123456}
+      OTP_EXPIRE_MINUTES: ${OTP_EXPIRE_MINUTES:-5}
+      TOKEN_EXPIRE_DAYS: ${TOKEN_EXPIRE_DAYS:-30}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_ACCESS_TOKEN_EXPIRE_DAYS: ${JWT_ACCESS_TOKEN_EXPIRE_DAYS:-30}
+      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_POOL_SIZE: ${POSTGRES_POOL_SIZE:-5}
+      POSTGRES_MAX_OVERFLOW: ${POSTGRES_MAX_OVERFLOW:-10}
+      OPENAI_API_BASE: ${OPENAI_API_BASE:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:-}
+      DEFAULT_LLM_TEMPERATURE: ${DEFAULT_LLM_TEMPERATURE:-0.7}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-console}
+    volumes:
+      - ./uploads:/app/uploads
     ports:
       - "4000:4000"
     healthcheck:
@@ -22,7 +49,9 @@ services:
       context: .
       target: web
       args:
-        VITE_API_BASE_URL: ""
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    environment:
+      API_TARGET: http://api:4000
     depends_on:
       api:
         condition: service_healthy

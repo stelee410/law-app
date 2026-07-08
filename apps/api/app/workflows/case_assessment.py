@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
 from typing import TypedDict
 
+from app.core.config import Settings
 from app.schemas import AssessmentResult, LawCase, ServicePlan
+from app.workflows import llm as llm_workflow
 
 try:
   from langgraph.graph import END, START, StateGraph
@@ -54,10 +56,11 @@ class CaseAssessmentState(TypedDict, total=False):
 AssessmentState = CaseAssessmentState
 
 
-def assess_case(law_case: LawCase) -> AssessmentResult:
+def assess_case(law_case: LawCase, settings: Settings | None = None) -> AssessmentResult:
   state = _initial_state(law_case)
   if StateGraph is None:
-    return _run_fallback(state)["assessment"]
+    result = _run_fallback(state)
+    return _assessment_with_optional_llm(settings, law_case, result)
 
   workflow = StateGraph(CaseAssessmentState)
   workflow.add_node("evidence_summary", evidence_summary)
@@ -72,7 +75,7 @@ def assess_case(law_case: LawCase) -> AssessmentResult:
   workflow.add_edge("plan_recommendation", "report_generation")
   workflow.add_edge("report_generation", END)
   result = workflow.compile().invoke(state)
-  return result["assessment"]
+  return _assessment_with_optional_llm(settings, law_case, result)
 
 
 def evidence_summary(state: AssessmentState) -> AssessmentState:
@@ -185,6 +188,21 @@ def _run_fallback(state: AssessmentState) -> AssessmentState:
 
 def _initial_state(law_case: LawCase) -> AssessmentState:
   return {"law_case": law_case, "steps": []}
+
+
+def _assessment_with_optional_llm(
+  settings: Settings | None,
+  law_case: LawCase,
+  state: AssessmentState,
+) -> AssessmentResult:
+  if settings is not None:
+    try:
+      llm_assessment = llm_workflow.generate_assessment_with_llm(settings, law_case, state)
+    except Exception:
+      llm_assessment = None
+    if llm_assessment is not None:
+      return llm_assessment
+  return state["assessment"]
 
 
 def _now_iso() -> str:

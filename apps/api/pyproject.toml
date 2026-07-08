@@ -5,20 +5,18 @@ description = "Minimal FastAPI backend for the legal AI prototype."
 requires-python = ">=3.13"
 dependencies = [
   "fastapi>=0.115.0,<1.0.0",
+  "httpx>=0.27.0,<1.0.0",
+  "psycopg[binary,pool]>=3.2.0,<4.0.0",
+  "pyjwt>=2.10.0,<3.0.0",
   "langgraph>=1.2.0,<2.0.0",
+  "langfuse>=3.0.0,<4.0.0",
   "pydantic-settings>=2.4.0,<3.0.0",
   "python-multipart>=0.0.20,<1.0.0",
   "uvicorn[standard]>=0.34.0,<1.0.0",
 ]
 
-[project.optional-dependencies]
-observability = [
-  "langfuse>=3.0.0,<4.0.0",
-]
-
 [dependency-groups]
 dev = [
-  "httpx>=0.27.0,<1.0.0",
   "httpx2>=2.0.0",
   "pytest>=8.0.0,<9.0.0",
 ]

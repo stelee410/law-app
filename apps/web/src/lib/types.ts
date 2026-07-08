@@ -1,5 +1,14 @@
 export type EvidenceStatus = 'pending' | 'uploaded' | 'recognized' | 'optional';
 
+export type HealthStatusValue = string | number | boolean | null;
+
+export type HealthResponse = {
+  ok: boolean;
+  service: string;
+  storage?: string;
+  security?: HealthStatusValue | Record<string, HealthStatusValue>;
+};
+
 export type EvidenceFile = {
   id: string;
   name: string;

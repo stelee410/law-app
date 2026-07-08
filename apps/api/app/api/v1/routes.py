@@ -9,13 +9,13 @@ from app.core.config import Settings
 from app.evidence import service as evidence_service
 from app.events import service as events_service
 from app.schemas import CreateCaseInput, LoginInput, RequestCodeInput, SelectPlanInput, User
-from app.store import InMemoryStore
+from app.store import AppStore
 from app.workflows import service as assessment_service
 
 router = APIRouter()
 
 
-def _get_store(request: Request) -> InMemoryStore:
+def _get_store(request: Request) -> AppStore:
   return request.app.state.store
 
 
@@ -24,7 +24,7 @@ def _get_settings(request: Request) -> Settings:
 
 
 def _get_current_user(
-  store: Annotated[InMemoryStore, Depends(_get_store)],
+  store: Annotated[AppStore, Depends(_get_store)],
   authorization: Annotated[str | None, Header()] = None,
 ) -> User:
   token = authorization.removeprefix("Bearer ").strip() if authorization and authorization.startswith("Bearer ") else None
@@ -38,13 +38,19 @@ def _get_current_user(
 
 @router.get("/health")
 def health(settings: Annotated[Settings, Depends(_get_settings)]) -> dict[str, str | bool]:
-  return {"ok": True, "service": settings.PROJECT_NAME, "storage": "memory"}
+  return {
+    "ok": True,
+    "service": settings.PROJECT_NAME,
+    "storage": settings.STORAGE_BACKEND,
+    "llmConfigured": settings.llm_configured,
+    "langfuseConfigured": settings.langfuse_configured,
+  }
 
 
 @router.post("/auth/request-code")
 def request_code(
   payload: RequestCodeInput,
-  store: Annotated[InMemoryStore, Depends(_get_store)],
+  store: Annotated[AppStore, Depends(_get_store)],
 ) -> dict[str, str]:
   return auth_service.request_login_code(store, payload.phone).model_dump()
 
@@ -52,7 +58,7 @@ def request_code(
 @router.post("/auth/login")
 def login(
   payload: LoginInput,
-  store: Annotated[InMemoryStore, Depends(_get_store)],
+  store: Annotated[AppStore, Depends(_get_store)],
 ):
   session = auth_service.login_with_code(store, payload.phone, payload.code)
   if session is None:
@@ -68,7 +74,7 @@ def me(current_user: Annotated[User, Depends(_get_current_user)]):
 @router.get("/cases")
 def list_cases(
   current_user: Annotated[User, Depends(_get_current_user)],
-  store: Annotated[InMemoryStore, Depends(_get_store)],
+  store: Annotated[AppStore, Depends(_get_store)],
 ):
   return {"cases": cases_service.list_cases(store, current_user.id)}
 
@@ -77,7 +83,7 @@ def list_cases(
 def create_case(
   payload: CreateCaseInput,
   current_user: Annotated[User, Depends(_get_current_user)],
-  store: Annotated[InMemoryStore, Depends(_get_store)],
+  store: Annotated[AppStore, Depends(_get_store)],
 ):
   return {"case": cases_service.create_case(store, current_user.id, payload)}
 
@@ -86,7 +92,7 @@ def create_case(
 def get_case(
   case_id: str,
   current_user: Annotated[User, Depends(_get_current_user)],
-  store: Annotated[InMemoryStore, Depends(_get_store)],
+  store: Annotated[AppStore, Depends(_get_store)],
 ):
   law_case = cases_service.get_case(store, current_user.id, case_id)
   if law_case is None:
@@ -99,7 +105,7 @@ async def upload_evidence(
   case_id: str,
   category_id: str,
   current_user: Annotated[User, Depends(_get_current_user)],
-  store: Annotated[InMemoryStore, Depends(_get_store)],
+  store: Annotated[AppStore, Depends(_get_store)],
   file: UploadFile = File(...),
 ):
   evidence_file = await evidence_service.upload_evidence(
@@ -119,7 +125,7 @@ async def upload_evidence(
 def evaluate_case(
   case_id: str,
   current_user: Annotated[User, Depends(_get_current_user)],
-  store: Annotated[InMemoryStore, Depends(_get_store)],
+  store: Annotated[AppStore, Depends(_get_store)],
 ):
   job = assessment_service.start_case_assessment(store, current_user.id, case_id)
   law_case = cases_service.get_case(store, current_user.id, case_id)
@@ -132,7 +138,7 @@ def evaluate_case(
 def case_events(
   case_id: str,
   current_user: Annotated[User, Depends(_get_current_user)],
-  store: Annotated[InMemoryStore, Depends(_get_store)],
+  store: Annotated[AppStore, Depends(_get_store)],
 ):
   events = events_service.stream_case_events(store, current_user.id, case_id)
   if events is None:
@@ -149,7 +155,7 @@ def select_plan(
   case_id: str,
   payload: SelectPlanInput,
   current_user: Annotated[User, Depends(_get_current_user)],
-  store: Annotated[InMemoryStore, Depends(_get_store)],
+  store: Annotated[AppStore, Depends(_get_store)],
 ):
   law_case = cases_service.select_plan(store, current_user.id, case_id, payload.planId)
   if law_case is None:
