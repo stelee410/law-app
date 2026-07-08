@@ -486,6 +486,21 @@ describe('App', () => {
     expect(submit).toBeEnabled();
   });
 
+  it('renders registration pages with branded hero and touch-friendly legal links', async () => {
+    await router.navigate({ to: '/register/lawyer' });
+
+    render(<App />);
+
+    expect(await screen.findByRole('img', { name: '法灵 AI 品牌标识' })).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: '法律服务安全协作插图' })).toBeInTheDocument();
+    expect(await screen.findByText('律师入驻')).toBeInTheDocument();
+
+    const termsLink = await screen.findByRole('link', { name: '查看服务协议' });
+    const privacyLink = await screen.findByRole('link', { name: '查看隐私政策' });
+    expect(termsLink).toHaveClass('rounded-full');
+    expect(privacyLink).toHaveClass('rounded-full');
+  });
+
   it('opens registration legal links from explicit view actions', async () => {
     const user = userEvent.setup();
     await router.navigate({ to: '/register/client' });

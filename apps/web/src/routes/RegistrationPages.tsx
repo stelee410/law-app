@@ -1,7 +1,9 @@
 import { Link, useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, Send, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Send, ShieldCheck } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import type { ReactNode } from 'react';
+import brandLogo from '../assets/brand-logo.png';
+import loginHero from '../assets/login-hero.png';
 import { useOnboardLawyerMutation, useRegisterClientMutation, useRequestCodeMutation } from '../hooks/useCaseQueries';
 
 type ConsentState = {
@@ -106,17 +108,29 @@ export function LawyerOnboardingPage() {
 
 function RegistrationShell({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   const navigate = useNavigate();
+  const badgeText = title === '律师入驻' ? '入驻审核' : '隐私保护';
+
   return (
-    <div className="space-y-5">
-      <header className="space-y-4">
+    <div className="space-y-4">
+      <header className="space-y-3">
         <button className="flex items-center gap-2 text-sm font-bold text-slate-600" type="button" onClick={() => navigate({ to: '/login' })}>
           <ArrowLeft size={17} />
           返回登录
         </button>
-        <div>
-          <p className="text-sm font-black text-blue-700">法灵 AI</p>
-          <h1 className="mt-2 text-2xl font-black tracking-normal text-slate-950">{title}</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3" aria-label="法灵 AI">
+            <img className="size-12 rounded-xl object-cover shadow-md shadow-blue-200" src={brandLogo} alt="法灵 AI 品牌标识" loading="eager" />
+            <span className="text-base font-black text-blue-700">法灵 AI</span>
+          </div>
+          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+            <ShieldCheck className="mr-1 inline" size={14} />
+            {badgeText}
+          </span>
+        </div>
+        <img className="h-24 w-full rounded-lg object-cover object-center shadow-sm shadow-blue-100" src={loginHero} alt="法律服务安全协作插图" loading="eager" />
+        <div className="space-y-1">
+          <h1 className="text-2xl font-black tracking-normal text-slate-950">{title}</h1>
+          <p className="text-sm leading-6 text-slate-500">{description}</p>
         </div>
       </header>
       <section className="rounded-lg bg-white p-4 shadow-sm">{children}</section>
@@ -165,26 +179,37 @@ function TextField({ label, value, onChange, placeholder, inputMode }: { label: 
 }
 
 function ConsentFields({ consent, setConsent }: { consent: ConsentState; setConsent: (value: ConsentState) => void }) {
+  const consentItems = [
+    {
+      key: 'acceptedTerms' as const,
+      label: '我已阅读并同意服务协议',
+      linkLabel: '查看服务协议',
+      to: '/legal/terms'
+    },
+    {
+      key: 'acceptedPrivacy' as const,
+      label: '我已阅读并同意隐私政策',
+      linkLabel: '查看隐私政策',
+      to: '/legal/privacy'
+    }
+  ];
+
   return (
-    <div className="space-y-3">
-      <div className="rounded-lg bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-700">
-        <label className="flex gap-3">
-          <input className="mt-1 size-4 shrink-0 accent-blue-600" type="checkbox" checked={consent.acceptedTerms} onChange={(event) => setConsent({ ...consent, acceptedTerms: event.target.checked })} />
-          <span>我已阅读并同意服务协议</span>
-        </label>
-        <Link className="mt-2 inline-flex font-black text-blue-700" to="/legal/terms">
-          查看服务协议
-        </Link>
-      </div>
-      <div className="rounded-lg bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-700">
-        <label className="flex gap-3">
-          <input className="mt-1 size-4 shrink-0 accent-blue-600" type="checkbox" checked={consent.acceptedPrivacy} onChange={(event) => setConsent({ ...consent, acceptedPrivacy: event.target.checked })} />
-          <span>我已阅读并同意隐私政策</span>
-        </label>
-        <Link className="mt-2 inline-flex font-black text-blue-700" to="/legal/privacy">
-          查看隐私政策
-        </Link>
-      </div>
+    <div className="space-y-2">
+      {consentItems.map((item) => (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 shadow-sm" key={item.key}>
+          <div className="flex flex-col gap-3">
+            <label className="flex min-w-0 items-start gap-3 font-semibold">
+              <input className="mt-0.5 size-5 shrink-0 rounded border-slate-300 accent-blue-600" type="checkbox" checked={consent[item.key]} onChange={(event) => setConsent({ ...consent, [item.key]: event.target.checked })} />
+              <span className="leading-6">{item.label}</span>
+            </label>
+            <Link className="inline-flex h-9 w-fit items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-3 text-xs font-black text-blue-700" to={item.to}>
+              {item.linkLabel}
+              <ExternalLink size={13} />
+            </Link>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
