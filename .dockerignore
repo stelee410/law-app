@@ -1,8 +1,14 @@
 node_modules
 apps/*/node_modules
 apps/*/dist
+.venv
+apps/api/.venv
+__pycache__
+.pytest_cache
+.ruff_cache
 .git
 .DS_Store
 coverage
 uploads
 npm-debug.log*
+pnpm-debug.log*

@@ -1,31 +1,61 @@
-# 法灵 AI 法务
+# law-app
 
-一个本地可运行的法律 AI 追偿应用原型，包含：
+Mobile H5 legal case workflow scaffold.
 
-- 移动端优先的 React 前端
-- Express 后端 API
-- 证据上传、案件评估、方案选择、进度跟踪闭环
-- Docker Compose 本地部署
+The app is split into:
 
-## 本地开发
+- `apps/api`: Python FastAPI backend with a minimal case workflow API and LangGraph assessment boundary.
+- `apps/web`: React H5 frontend using the media-sense style stack: Vite, TanStack Router/Query, ky, Zustand, i18n, Tailwind, PWA, Vitest.
+
+Backend code is split by boundary:
+
+- `app/auth`: mock OTP login and bearer-token user lookup.
+- `app/cases`: case list/detail/create and service-plan selection.
+- `app/evidence`: upload handling.
+- `app/events`: SSE case event streaming.
+- `app/workflows`: LangGraph case assessment flow with deterministic fallback.
+
+## Local Development
+
+Install frontend dependencies:
 
 ```bash
-npm install
-npm run dev
+pnpm --dir apps/web install
 ```
 
-前端默认运行在 `http://localhost:5173`，后端默认运行在 `http://localhost:4000`。
+Install backend dependencies:
 
-## Docker 部署
+```bash
+uv sync --directory apps/api --project .
+```
+
+Run both apps:
+
+```bash
+pnpm dev
+```
+
+API defaults to `http://localhost:4000`; web defaults to `http://localhost:5173`.
+
+## Verification
+
+```bash
+pnpm test
+pnpm typecheck
+pnpm build
+```
+
+Backend-only:
+
+```bash
+uv run --directory apps/api --project . pytest
+uv run --directory apps/api --project . uvicorn app.main:app --reload --host 0.0.0.0 --port 4000
+```
+
+## Docker
 
 ```bash
 docker compose up --build
 ```
 
-打开 `http://localhost:8080`。
-
-## 测试
-
-```bash
-npm test
-```
+Open `http://localhost:8080`.
