@@ -5,6 +5,7 @@ import { FeatureStrip } from '../components/h5/FeatureStrip';
 import { MetricCard } from '../components/h5/MetricCard';
 import { SectionHeader } from '../components/h5/SectionHeader';
 import { useCasesQuery } from '../hooks/useCaseQueries';
+import type { CaseType } from '../lib/types';
 import { deriveDashboard } from '../lib/viewModel';
 import { useAuthStore } from '../state/authStore';
 
@@ -15,8 +16,8 @@ export function HomePage() {
   const cases = casesQuery.data ?? [];
   const dashboard = deriveDashboard(cases);
 
-  function startCase() {
-    void navigate({ to: '/cases/new' });
+  function startCase(caseType: CaseType = 'debt_collection') {
+    void navigate({ to: '/cases/new', search: { caseType } });
   }
 
   return (
@@ -60,6 +61,7 @@ export function HomePage() {
               </div>
               <Link
                 to="/cases/new"
+                search={{ caseType: 'debt_collection' }}
                 className="mt-4 inline-flex h-11 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-black text-white"
               >
                 立即发起
@@ -99,7 +101,7 @@ export function HomePage() {
             <span className="mt-1 block text-sm leading-6 text-slate-500">
               {casesQuery.isError ? '案件数据暂未同步，可先发起追偿或稍后刷新。' : '发起第一笔追偿后，案件进度会显示在这里。'}
             </span>
-            <Link to="/cases/new" className="mt-4 inline-flex h-11 items-center rounded-lg bg-blue-600 px-4 font-black text-white">
+            <Link to="/cases/new" search={{ caseType: 'debt_collection' }} className="mt-4 inline-flex h-11 items-center rounded-lg bg-blue-600 px-4 font-black text-white">
               立即发起
             </Link>
           </div>

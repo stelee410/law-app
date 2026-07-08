@@ -3,12 +3,19 @@ import { useAuthStore } from '../state/authStore';
 import type {
   AuthToken,
   CaseEvent,
+  CreateDocumentInput,
   CreateCaseInput,
   HealthResponse,
+  LegalDocument,
   LawCase,
+  NotificationMessage,
   OtpResponse,
   PlanId,
-  User
+  ReviewOpinion,
+  SubmitReviewInput,
+  UpdateDocumentInput,
+  User,
+  WorkItem
 } from './types';
 
 const DEFAULT_API_BASE_URL = '/api/v1';
@@ -90,6 +97,68 @@ export async function evaluateCase(caseId: string): Promise<LawCase> {
 export async function selectCasePlan(caseId: string, planId: PlanId): Promise<LawCase> {
   const response = await api.post(apiUrl(`/cases/${caseId}/plan`), { json: { planId } }).json<{ case: LawCase }>();
   return response.case;
+}
+
+export async function getMessages(): Promise<NotificationMessage[]> {
+  const response = await api.get(apiUrl('/messages')).json<{ messages: NotificationMessage[] }>();
+  return response.messages;
+}
+
+export async function markMessageRead(messageId: string): Promise<NotificationMessage> {
+  const response = await api.post(apiUrl(`/messages/${messageId}/read`)).json<{ message: NotificationMessage }>();
+  return response.message;
+}
+
+export async function getCaseWorkItems(caseId: string): Promise<WorkItem[]> {
+  const response = await api.get(apiUrl(`/cases/${caseId}/work-items`)).json<{ workItems: WorkItem[] }>();
+  return response.workItems;
+}
+
+export async function getCaseDocuments(caseId: string): Promise<LegalDocument[]> {
+  const response = await api.get(apiUrl(`/cases/${caseId}/documents`)).json<{ documents: LegalDocument[] }>();
+  return response.documents;
+}
+
+export async function approveCaseDocument(caseId: string, documentId: string): Promise<{ case: LawCase; document: LegalDocument }> {
+  return api.post(apiUrl(`/cases/${caseId}/documents/${documentId}/approve`)).json<{ case: LawCase; document: LegalDocument }>();
+}
+
+export async function getLawyerTasks(): Promise<WorkItem[]> {
+  const response = await api.get(apiUrl('/lawyer/tasks')).json<{ tasks: WorkItem[] }>();
+  return response.tasks;
+}
+
+export async function getLawyerTask(taskId: string): Promise<{ task: WorkItem; case: LawCase }> {
+  return api.get(apiUrl(`/lawyer/tasks/${taskId}`)).json<{ task: WorkItem; case: LawCase }>();
+}
+
+export async function getLawyerCaseDocuments(caseId: string): Promise<LegalDocument[]> {
+  const response = await api.get(apiUrl(`/lawyer/cases/${caseId}/documents`)).json<{ documents: LegalDocument[] }>();
+  return response.documents;
+}
+
+export async function submitLawyerReview(taskId: string, input: SubmitReviewInput): Promise<{ case: LawCase; workItem: WorkItem; review: ReviewOpinion }> {
+  return api.post(apiUrl(`/lawyer/tasks/${taskId}/review`), { json: input }).json<{ case: LawCase; workItem: WorkItem; review: ReviewOpinion }>();
+}
+
+export async function createLawyerDocument(caseId: string, input: CreateDocumentInput): Promise<LegalDocument> {
+  const response = await api.post(apiUrl(`/lawyer/cases/${caseId}/documents`), { json: input }).json<{ document: LegalDocument }>();
+  return response.document;
+}
+
+export async function updateLawyerDocument(caseId: string, documentId: string, input: UpdateDocumentInput): Promise<LegalDocument> {
+  const response = await api.patch(apiUrl(`/lawyer/cases/${caseId}/documents/${documentId}`), { json: input }).json<{ document: LegalDocument }>();
+  return response.document;
+}
+
+export async function archiveLawyerDocument(caseId: string, documentId: string): Promise<LegalDocument> {
+  const response = await api.delete(apiUrl(`/lawyer/cases/${caseId}/documents/${documentId}`)).json<{ document: LegalDocument }>();
+  return response.document;
+}
+
+export async function submitLawyerDocument(caseId: string, documentId: string): Promise<LegalDocument> {
+  const response = await api.post(apiUrl(`/lawyer/cases/${caseId}/documents/${documentId}/submit`)).json<{ document: LegalDocument }>();
+  return response.document;
 }
 
 export function parseCaseEvent(caseId: string, eventName: string, rawData: string): CaseEvent | undefined {

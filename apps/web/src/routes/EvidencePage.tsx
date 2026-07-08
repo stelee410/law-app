@@ -33,6 +33,11 @@ export function EvidencePage() {
     await navigate({ to: '/cases/$caseId/assessment', params: { caseId } });
   }
 
+  function uploadForCategory(nextCategoryId: string) {
+    setCategoryId(nextCategoryId);
+    window.requestAnimationFrame(() => fileRef.current?.click());
+  }
+
   if (!lawCase) return <StateBlock title="证据清单加载中" />;
 
   return (
@@ -57,18 +62,16 @@ export function EvidencePage() {
       <EvidenceUploadPanel pending={upload.isPending} onUpload={() => fileRef.current?.click()} />
       <input ref={fileRef} className="hidden" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={handleFile} />
 
-      <section className="space-y-3">
+      <section className="space-y-3 pb-4">
         <SectionHeader title="材料清单" subtitle="先选择材料类型，再上传对应文件" />
         {lawCase.evidence.map((category) => (
-          <button
+          <article
             key={category.id}
             className={`w-full rounded-lg border p-4 text-left shadow-sm ${
               categoryId === category.id ? 'border-blue-500 bg-white' : 'border-transparent bg-white'
             }`}
-            type="button"
-            onClick={() => setCategoryId(category.id)}
           >
-            <span className="flex items-start gap-3">
+            <button className="flex w-full items-start gap-3 text-left" type="button" onClick={() => setCategoryId(category.id)}>
               <span className={`grid size-10 shrink-0 place-items-center rounded-lg ${category.files.length ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                 {category.files.length ? <Check size={18} /> : <FileText size={18} />}
               </span>
@@ -84,8 +87,15 @@ export function EvidencePage() {
                   </small>
                 ))}
               </span>
-            </span>
-          </button>
+            </button>
+            <button
+              className="mt-3 h-10 w-full rounded-lg bg-blue-50 text-sm font-black text-blue-700"
+              type="button"
+              onClick={() => uploadForCategory(category.id)}
+            >
+              {category.files.length ? '继续补充' : '上传此项材料'}
+            </button>
+          </article>
         ))}
       </section>
 

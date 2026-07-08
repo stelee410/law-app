@@ -3,6 +3,7 @@ import { ArrowLeft, Bot, CheckCircle2 } from 'lucide-react';
 import { AssessmentSummary } from '../components/h5/AssessmentSummary';
 import { StateBlock } from '../components/StateBlock';
 import { useEvaluateCaseMutation, useCaseQuery } from '../hooks/useCaseQueries';
+import { getCaseCatalogItem } from '../lib/caseCatalog';
 
 export function AssessmentPage() {
   const { caseId } = useParams({ strict: false }) as { caseId: string };
@@ -12,6 +13,7 @@ export function AssessmentPage() {
   const assessment = lawCase?.assessment;
 
   if (!lawCase) return <StateBlock title="评估数据加载中" />;
+  const catalog = getCaseCatalogItem(lawCase.caseType);
 
   return (
     <div className="space-y-5">
@@ -21,7 +23,7 @@ export function AssessmentPage() {
       </Link>
 
       <header>
-        <p className="text-sm font-bold text-blue-700">AI评估结果</p>
+        <p className="text-sm font-bold text-blue-700">AI评估结果 · {catalog.label}</p>
         <h1 className="mt-1 break-words text-2xl font-black tracking-normal">{lawCase.debtorName}</h1>
       </header>
 

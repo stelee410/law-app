@@ -5,11 +5,13 @@ import type { ServicePlan } from '../../lib/types';
 export function PlanCard({
   plan,
   selected,
+  locked,
   pending,
   onSelect
 }: {
   plan: ServicePlan;
   selected: boolean;
+  locked: boolean;
   pending: boolean;
   onSelect: () => void;
 }) {
@@ -40,7 +42,7 @@ export function PlanCard({
           selected ? 'bg-emerald-100 text-emerald-700' : plan.recommended ? 'bg-blue-600 text-white' : 'bg-slate-950 text-white'
         } disabled:opacity-50`}
         type="button"
-        disabled={pending || selected}
+        disabled={pending || locked}
         onClick={onSelect}
       >
         {selected ? '已选择' : '选择此方案'}

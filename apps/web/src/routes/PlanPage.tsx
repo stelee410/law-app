@@ -4,6 +4,7 @@ import { PlanCard } from '../components/h5/PlanCard';
 import { SectionHeader } from '../components/h5/SectionHeader';
 import { StateBlock } from '../components/StateBlock';
 import { useCaseQuery, useSelectPlanMutation } from '../hooks/useCaseQueries';
+import { getCaseCatalogItem } from '../lib/caseCatalog';
 import type { PlanId } from '../lib/types';
 
 export function PlanPage() {
@@ -13,13 +14,16 @@ export function PlanPage() {
   const selectPlan = useSelectPlanMutation(caseId);
   const lawCase = caseQuery.data;
   const plans = lawCase?.assessment?.plans ?? [];
+  const planLocked = Boolean(lawCase?.selectedPlan);
 
   async function handleSelect(planId: PlanId) {
+    if (planLocked) return;
     await selectPlan.mutateAsync(planId);
     await navigate({ to: '/cases/$caseId', params: { caseId } });
   }
 
   if (!lawCase) return <StateBlock title="方案加载中" />;
+  const catalog = getCaseCatalogItem(lawCase.caseType);
 
   return (
     <div className="space-y-5">
@@ -29,7 +33,7 @@ export function PlanPage() {
       </Link>
 
       <header>
-        <p className="text-sm font-bold text-blue-700">服务方案</p>
+        <p className="text-sm font-bold text-blue-700">服务方案 · {catalog.label}</p>
         <h1 className="mt-1 text-2xl font-black tracking-normal">选择案件闭环路径</h1>
         <p className="mt-2 text-sm leading-6 text-slate-500">基于案件金额、证据完整度和回款目标推荐服务方案。</p>
       </header>
@@ -51,6 +55,7 @@ export function PlanPage() {
             key={plan.id}
             plan={plan}
             selected={lawCase.selectedPlan === plan.id}
+            locked={planLocked}
             pending={selectPlan.isPending}
             onSelect={() => handleSelect(plan.id)}
           />

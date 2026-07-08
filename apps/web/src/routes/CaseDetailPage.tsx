@@ -5,13 +5,17 @@ import { SectionHeader } from '../components/h5/SectionHeader';
 import { Timeline } from '../components/h5/Timeline';
 import { StateBlock } from '../components/StateBlock';
 import { useCaseEvents } from '../hooks/useCaseEvents';
-import { useCaseQuery } from '../hooks/useCaseQueries';
+import { useApproveDocumentMutation, useCaseDocumentsQuery, useCaseQuery, useCaseWorkItemsQuery } from '../hooks/useCaseQueries';
+import { getCaseCatalogItem } from '../lib/caseCatalog';
 import { fileSizeLabel, formatDate, formatMoney } from '../lib/format';
 import { deriveLatestProgress, evidenceProgress, stageProgress } from '../lib/viewModel';
 
 export function CaseDetailPage() {
   const { caseId } = useParams({ strict: false }) as { caseId: string };
   const caseQuery = useCaseQuery(caseId);
+  const workItemsQuery = useCaseWorkItemsQuery(caseId);
+  const documentsQuery = useCaseDocumentsQuery(caseId);
+  const approveDocument = useApproveDocumentMutation(caseId);
   const { events, connected } = useCaseEvents(caseId, Boolean(caseQuery.data));
   const lawCase = caseQuery.data;
 
@@ -21,7 +25,12 @@ export function CaseDetailPage() {
   const evidence = evidenceProgress(lawCase);
   const stages = stageProgress(lawCase.stages);
   const latest = deriveLatestProgress(lawCase, events);
+  const catalog = getCaseCatalogItem(lawCase.caseType);
   const nextHref = lawCase.assessment ? (lawCase.selectedPlan ? '/messages' : `/cases/${caseId}/plans`) : `/cases/${caseId}/assessment`;
+  const workItems = workItemsQuery.data ?? [];
+  const documents = documentsQuery.data ?? [];
+  const pendingDocuments = documents.filter((document) => document.status === 'pending_client_approval');
+  const serviceTitle = lawCase.selectedPlan === 'self-service' ? 'AI自助引导' : lawCase.selectedPlan ? '律师服务闭环' : '服务待选择';
 
   return (
     <div className="space-y-5">
@@ -38,7 +47,7 @@ export function CaseDetailPage() {
           <div className="min-w-0 flex-1">
             <h1 className="break-words text-2xl font-black tracking-normal">{lawCase.debtorName}</h1>
             <p className="mt-1 break-words text-sm leading-5 text-slate-300">
-              {lawCase.caseNo} · {formatDate(lawCase.createdAt)}
+              {catalog.label} · {lawCase.caseNo} · {formatDate(lawCase.createdAt)}
             </p>
             <strong className="mt-4 block break-words text-3xl tracking-normal">{formatMoney(lawCase.amount)}</strong>
           </div>
@@ -89,6 +98,42 @@ export function CaseDetailPage() {
           <ChevronRight size={17} />
         </a>
       </section>
+
+      {lawCase.selectedPlan && (
+        <section className="rounded-lg bg-white p-4 shadow-sm">
+          <SectionHeader title={serviceTitle} subtitle="服务方案选择后，待办、复核意见和文书确认会在这里汇总" />
+          <div className="mt-4 space-y-3">
+            {workItems.map((item) => (
+              <div key={item.id} className="rounded-lg bg-slate-50 p-3 text-sm leading-6">
+                <div className="flex items-center justify-between gap-3">
+                  <strong>{item.title}</strong>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${item.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                    {item.status === 'completed' ? '已完成' : '处理中'}
+                  </span>
+                </div>
+                <p className="mt-1 text-slate-500">{item.summary}</p>
+              </div>
+            ))}
+            {pendingDocuments.map((document) => (
+              <div key={document.id} className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm leading-6 text-blue-900">
+                <strong className="block">{document.title}</strong>
+                <p className="mt-1 break-words">{document.body}</p>
+                <button
+                  className="mt-3 h-10 w-full rounded-lg bg-blue-600 font-black text-white disabled:opacity-50"
+                  type="button"
+                  disabled={approveDocument.isPending}
+                  onClick={() => approveDocument.mutate(document.id)}
+                >
+                  确认文书并进入下一阶段
+                </button>
+              </div>
+            ))}
+            {workItems.length === 0 && pendingDocuments.length === 0 && (
+              <p className="rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-500">等待系统生成服务待办。</p>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="rounded-lg bg-white p-4 shadow-sm">
         <SectionHeader

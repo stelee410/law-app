@@ -30,9 +30,12 @@ export function RootLayout() {
       void navigate({ to: '/login', replace: true });
     }
     if (token && isLogin) {
-      void navigate({ to: '/', replace: true });
+      void navigate({ to: user?.role === 'lawyer' ? '/lawyer' : '/', replace: true });
     }
-  }, [isLogin, navigate, token]);
+    if (token && user?.role === 'lawyer' && location.pathname === '/') {
+      void navigate({ to: '/lawyer', replace: true });
+    }
+  }, [isLogin, location.pathname, navigate, token, user?.role]);
 
   const showNav = Boolean(token && !isLogin);
   const needsAuthRedirect = !token && !isLogin;
@@ -55,7 +58,7 @@ export function RootLayout() {
             <Outlet />
           )}
         </div>
-        {showNav && <BottomNav pathname={location.pathname} />}
+        {showNav && <BottomNav pathname={location.pathname} role={user?.role} />}
       </section>
     </main>
   );

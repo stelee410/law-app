@@ -9,8 +9,17 @@ from app.core.config import Settings
 from app.evidence import service as evidence_service
 from app.evidence.service import EvidenceUploadError
 from app.events import service as events_service
-from app.schemas import CreateCaseInput, LoginInput, RequestCodeInput, SelectPlanInput, User
-from app.store import AppStore
+from app.schemas import (
+  CreateCaseInput,
+  CreateDocumentInput,
+  LoginInput,
+  RequestCodeInput,
+  SelectPlanInput,
+  SubmitReviewInput,
+  UpdateDocumentInput,
+  User,
+)
+from app.store import AppStore, InvalidStateError
 from app.workflows import service as assessment_service
 
 router = APIRouter()
@@ -35,6 +44,12 @@ def _get_current_user(
   if user is None:
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="AUTH_REQUIRED")
   return user
+
+
+def _get_current_lawyer(current_user: Annotated[User, Depends(_get_current_user)]) -> User:
+  if current_user.role != "lawyer":
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="FORBIDDEN")
+  return current_user
 
 
 @router.get("/health")
@@ -72,6 +87,26 @@ def me(current_user: Annotated[User, Depends(_get_current_user)]):
   return {"user": current_user}
 
 
+@router.get("/messages")
+def messages(
+  current_user: Annotated[User, Depends(_get_current_user)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  return {"messages": store.list_messages(current_user.id)}
+
+
+@router.post("/messages/{message_id}/read")
+def mark_message_read(
+  message_id: str,
+  current_user: Annotated[User, Depends(_get_current_user)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  message = store.mark_message_read(current_user.id, message_id)
+  if message is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MESSAGE_NOT_FOUND")
+  return {"message": message}
+
+
 @router.get("/cases")
 def list_cases(
   current_user: Annotated[User, Depends(_get_current_user)],
@@ -99,6 +134,47 @@ def get_case(
   if law_case is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
   return {"case": law_case}
+
+
+@router.get("/cases/{case_id}/work-items")
+def case_work_items(
+  case_id: str,
+  current_user: Annotated[User, Depends(_get_current_user)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  items = store.list_case_work_items(current_user.id, case_id)
+  if items is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
+  return {"workItems": items}
+
+
+@router.get("/cases/{case_id}/documents")
+def case_documents(
+  case_id: str,
+  current_user: Annotated[User, Depends(_get_current_user)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  documents = store.list_case_documents(current_user.id, case_id)
+  if documents is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
+  return {"documents": documents}
+
+
+@router.post("/cases/{case_id}/documents/{document_id}/approve")
+def approve_document(
+  case_id: str,
+  document_id: str,
+  current_user: Annotated[User, Depends(_get_current_user)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    result = store.approve_document(current_user.id, case_id, document_id)
+  except InvalidStateError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+  if result is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DOCUMENT_NOT_FOUND")
+  law_case, document = result
+  return {"case": law_case, "document": document}
 
 
 @router.post("/cases/{case_id}/evidence/{category_id}")
@@ -161,7 +237,120 @@ def select_plan(
   current_user: Annotated[User, Depends(_get_current_user)],
   store: Annotated[AppStore, Depends(_get_store)],
 ):
-  law_case = cases_service.select_plan(store, current_user.id, case_id, payload.planId)
+  try:
+    law_case = cases_service.select_plan(store, current_user.id, case_id, payload.planId)
+  except InvalidStateError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
   if law_case is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
   return {"case": law_case}
+
+
+@router.get("/lawyer/tasks")
+def lawyer_tasks(
+  current_lawyer: Annotated[User, Depends(_get_current_lawyer)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  tasks = store.list_lawyer_tasks(current_lawyer.id)
+  return {"tasks": tasks or []}
+
+
+@router.get("/lawyer/tasks/{task_id}")
+def lawyer_task(
+  task_id: str,
+  current_lawyer: Annotated[User, Depends(_get_current_lawyer)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  task = store.get_lawyer_task(current_lawyer.id, task_id)
+  if task is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="TASK_NOT_FOUND")
+  law_case = store.get_lawyer_case(current_lawyer.id, task.caseId)
+  return {"task": task, "case": law_case}
+
+
+@router.post("/lawyer/tasks/{task_id}/review")
+def submit_lawyer_review(
+  task_id: str,
+  payload: SubmitReviewInput,
+  current_lawyer: Annotated[User, Depends(_get_current_lawyer)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  result = store.submit_review(current_lawyer.id, task_id, payload)
+  if result is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="TASK_NOT_FOUND")
+  law_case, work_item, review = result
+  return {"case": law_case, "workItem": work_item, "review": review}
+
+
+@router.post("/lawyer/cases/{case_id}/documents", status_code=status.HTTP_201_CREATED)
+def create_lawyer_document(
+  case_id: str,
+  payload: CreateDocumentInput,
+  current_lawyer: Annotated[User, Depends(_get_current_lawyer)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  document = store.create_document(current_lawyer.id, case_id, payload)
+  if document is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
+  return {"document": document}
+
+
+@router.get("/lawyer/cases/{case_id}/documents")
+def lawyer_case_documents(
+  case_id: str,
+  current_lawyer: Annotated[User, Depends(_get_current_lawyer)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  documents = store.list_lawyer_case_documents(current_lawyer.id, case_id)
+  if documents is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
+  return {"documents": documents}
+
+
+@router.patch("/lawyer/cases/{case_id}/documents/{document_id}")
+def update_lawyer_document(
+  case_id: str,
+  document_id: str,
+  payload: UpdateDocumentInput,
+  current_lawyer: Annotated[User, Depends(_get_current_lawyer)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    document = store.update_document(current_lawyer.id, case_id, document_id, payload)
+  except InvalidStateError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+  if document is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DOCUMENT_NOT_FOUND")
+  return {"document": document}
+
+
+@router.delete("/lawyer/cases/{case_id}/documents/{document_id}")
+def archive_lawyer_document(
+  case_id: str,
+  document_id: str,
+  current_lawyer: Annotated[User, Depends(_get_current_lawyer)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    document = store.archive_document(current_lawyer.id, case_id, document_id)
+  except InvalidStateError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+  if document is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DOCUMENT_NOT_FOUND")
+  return {"document": document}
+
+
+@router.post("/lawyer/cases/{case_id}/documents/{document_id}/submit")
+def submit_lawyer_document(
+  case_id: str,
+  document_id: str,
+  current_lawyer: Annotated[User, Depends(_get_current_lawyer)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    document = store.submit_document(current_lawyer.id, case_id, document_id)
+  except InvalidStateError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+  if document is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DOCUMENT_NOT_FOUND")
+  return {"document": document}

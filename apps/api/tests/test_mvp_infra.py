@@ -3,11 +3,12 @@ from pathlib import Path
 
 import pytest
 from fastapi import UploadFile
+from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.evidence import service as evidence_service
 from app.evidence.service import upload_evidence
-from app.schemas import AssessmentResult, CreateCaseInput
+from app.schemas import AssessmentResult, CaseType, CreateCaseInput
 from app.store import InMemoryStore
 from app.workflows.case_assessment import assess_case
 
@@ -196,3 +197,68 @@ def test_llm_assessment_failure_falls_back_to_deterministic_result(monkeypatch) 
 
   assert isinstance(result, AssessmentResult)
   assert result.winRate >= 60
+
+
+@pytest.mark.parametrize(
+  ("case_type", "expected_category", "expected_route_text"),
+  [
+    ("debt_collection", "transfer", "发函催告"),
+    ("lawyer_letter", "identity", "律师复核"),
+    ("labor_dispute", "payroll", "仲裁"),
+    ("rental_dispute", "lease_contract", "协商"),
+    ("contract_review", "contract_draft", "风险条款"),
+  ],
+)
+def test_case_type_controls_evidence_and_assessment(
+  case_type: CaseType,
+  expected_category: str,
+  expected_route_text: str,
+) -> None:
+  store = InMemoryStore(_memory_settings(MOCK_OTP_CODE="654321"))
+  session, _law_case = _create_demo_case(store)
+
+  law_case = store.create_case(
+    session.user.id,
+    CreateCaseInput(
+      caseType=case_type,
+      debtorName=f"{case_type} counterparty",
+      contactName="Demo contact",
+      contactPhone="13900001111",
+      amount=68000,
+      contractDate="2026-06-20",
+      dispute="This matter has enough facts for the mobile H5 MVP assessment flow.",
+      dueStatus="已到期",
+      partyRole="claimant",
+      counterpartyName=f"{case_type} counterparty",
+      region="海南省海口市",
+      incidentDate="2026-06-21",
+      claimType="demo_claim",
+      claimSummary="Demo claim summary for type-specific assessment.",
+      privacyConsent=True,
+      matterFields={"source": "test"},
+    ),
+  )
+
+  category_ids = {item.id for item in law_case.evidence}
+  assert law_case.caseType == case_type
+  assert expected_category in category_ids
+
+  result = assess_case(law_case, store.settings)
+
+  assert expected_route_text in result.suggestedRoute
+  assert result.summary
+  assert any("AI" in item or "律师" in item for item in result.findings)
+
+
+def test_create_case_requires_privacy_consent() -> None:
+  with pytest.raises(ValidationError):
+    CreateCaseInput(
+      debtorName="privacy counterparty",
+      contactName="Demo contact",
+      contactPhone="13900001111",
+      amount=68000,
+      contractDate="2026-06-20",
+      dispute="This matter has enough facts for privacy consent validation.",
+      dueStatus="已到期",
+      privacyConsent=False,
+    )

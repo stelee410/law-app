@@ -1,11 +1,13 @@
 import { Link } from '@tanstack/react-router';
 import { ChevronRight, ShieldCheck } from 'lucide-react';
+import { getCaseCatalogItem } from '../../lib/caseCatalog';
 import { formatDate, formatMoney } from '../../lib/format';
 import { evidenceProgress } from '../../lib/viewModel';
 import type { LawCase } from '../../lib/types';
 
 export function CaseCard({ lawCase }: { lawCase: LawCase }) {
   const progress = evidenceProgress(lawCase);
+  const catalog = getCaseCatalogItem(lawCase.caseType);
 
   return (
     <Link
@@ -24,6 +26,7 @@ export function CaseCard({ lawCase }: { lawCase: LawCase }) {
               {lawCase.status}
             </em>
           </span>
+          <span className="mt-1 block text-xs font-bold text-blue-700">{catalog.label}</span>
           <span className="mt-2 block text-sm font-black text-slate-900">{formatMoney(lawCase.amount)}</span>
           <span className="mt-1 block break-words text-xs leading-5 text-slate-500">
             {lawCase.caseNo} · {formatDate(lawCase.createdAt)} · {progress.label}

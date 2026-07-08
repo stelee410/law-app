@@ -35,6 +35,14 @@ export function LoginPage() {
           <h1 className="mt-2 text-3xl font-black tracking-normal text-slate-950">{t('loginTitle')}</h1>
           <p className="mt-3 text-sm leading-6 text-slate-500">登录后继续管理案件、证据、AI评估和服务方案。</p>
         </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-blue-700 shadow-sm" type="button" onClick={() => { setPhone('13800001234'); setCode(requestCode.data?.mockCode ?? '123456'); }}>
+            客户演示
+          </button>
+          <button className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm" type="button" onClick={() => { setPhone('13900009999'); setCode(requestCode.data?.mockCode ?? '123456'); }}>
+            律师演示
+          </button>
+        </div>
       </section>
 
       <form className="space-y-4 rounded-lg border border-white bg-white p-4 shadow-xl shadow-slate-200/70" onSubmit={handleSubmit}>

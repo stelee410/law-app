@@ -5,6 +5,9 @@ import { CasesPage } from './routes/CasesPage';
 import { EvidencePage } from './routes/EvidencePage';
 import { HomePage } from './routes/HomePage';
 import { LoginPage } from './routes/LoginPage';
+import { LawyerDashboardPage } from './routes/LawyerDashboardPage';
+import { LawyerDocumentEditorPage } from './routes/LawyerDocumentEditorPage';
+import { LawyerTaskPage } from './routes/LawyerTaskPage';
 import { MessagesPage } from './routes/MessagesPage';
 import { NewCasePage } from './routes/NewCasePage';
 import { NotFoundPage } from './routes/NotFoundPage';
@@ -76,6 +79,24 @@ const messagesRoute = createRoute({
   component: MessagesPage
 });
 
+const lawyerDashboardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'lawyer',
+  component: LawyerDashboardPage
+});
+
+const lawyerTaskRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'lawyer/tasks/$taskId',
+  component: LawyerTaskPage
+});
+
+const lawyerDocumentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'lawyer/cases/$caseId/documents/$documentId',
+  component: LawyerDocumentEditorPage
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -85,6 +106,9 @@ const routeTree = rootRoute.addChildren([
   evidenceRoute,
   assessmentRoute,
   planRoute,
+  lawyerDashboardRoute,
+  lawyerTaskRoute,
+  lawyerDocumentRoute,
   messagesRoute,
   profileRoute
 ]);
