@@ -1,5 +1,5 @@
-import { useNavigate } from '@tanstack/react-router';
-import { ShieldCheck, Smartphone } from 'lucide-react';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { ShieldCheck, Smartphone, UserPlus } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLoginMutation, useRequestCodeMutation } from '../hooks/useCaseQueries';
@@ -11,10 +11,19 @@ export function LoginPage() {
   const [code, setCode] = useState('');
   const requestCode = useRequestCodeMutation();
   const login = useLoginMutation();
+  const enableDemoLogin = import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true';
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await login.mutateAsync({ phone, code });
+    const session = await login.mutateAsync({ phone, code });
+    if (session.user.role === 'admin') {
+      await navigate({ to: '/admin' });
+      return;
+    }
+    if (session.user.role === 'lawyer') {
+      await navigate({ to: session.user.lawyerReviewStatus === 'approved' ? '/lawyer' : '/lawyer/review-status' });
+      return;
+    }
     await navigate({ to: '/' });
   }
 
@@ -36,13 +45,25 @@ export function LoginPage() {
           <p className="mt-3 text-sm leading-6 text-slate-500">登录后继续管理案件、证据、AI评估和服务方案。</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <button className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-blue-700 shadow-sm" type="button" onClick={() => { setPhone('13800001234'); setCode(requestCode.data?.mockCode ?? '123456'); }}>
-            客户演示
-          </button>
-          <button className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm" type="button" onClick={() => { setPhone('13900009999'); setCode(requestCode.data?.mockCode ?? '123456'); }}>
-            律师演示
-          </button>
+          <Link className="flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-3 text-sm font-bold text-blue-700 shadow-sm" to="/register/client">
+            <UserPlus size={16} />
+            客户注册
+          </Link>
+          <Link className="flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-3 text-sm font-bold text-slate-700 shadow-sm" to="/register/lawyer">
+            <ShieldCheck size={16} />
+            律师入驻
+          </Link>
         </div>
+        {enableDemoLogin && (
+          <div className="grid grid-cols-2 gap-2">
+            <button className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-bold text-blue-700" type="button" onClick={() => { setPhone('13800001234'); setCode(requestCode.data?.mockCode ?? '123456'); }}>
+              客户演示
+            </button>
+            <button className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700" type="button" onClick={() => { setPhone('13900009999'); setCode(requestCode.data?.mockCode ?? '123456'); }}>
+              律师演示
+            </button>
+          </div>
+        )}
       </section>
 
       <form className="space-y-4 rounded-lg border border-white bg-white p-4 shadow-xl shadow-slate-200/70" onSubmit={handleSubmit}>

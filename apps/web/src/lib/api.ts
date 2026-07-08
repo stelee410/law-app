@@ -1,11 +1,16 @@
 import ky from 'ky';
 import { useAuthStore } from '../state/authStore';
 import type {
+  AdminOverview,
+  AdminReviewLawyerInput,
+  AdminUpdateUserInput,
   AuthToken,
   CaseEvent,
+  ClientRegisterInput,
   CreateDocumentInput,
   CreateCaseInput,
   HealthResponse,
+  LawyerOnboardingInput,
   LegalDocument,
   LawCase,
   NotificationMessage,
@@ -29,6 +34,7 @@ export function resolveApiBaseUrl(value: string | undefined) {
 export const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
 
 export const api = ky.create({
+  baseUrl: typeof window === 'undefined' ? undefined : window.location.origin,
   timeout: 30000,
   hooks: {
     beforeRequest: [
@@ -37,6 +43,16 @@ export const api = ky.create({
         if (token) {
           request.headers.set('Authorization', `Bearer ${token}`);
         }
+      }
+    ],
+    afterResponse: [
+      async ({ response }) => {
+        if (response.status !== 403) return response;
+        const body = await response.clone().json<{ detail?: string }>().catch(() => undefined);
+        if (body?.detail === 'ACCOUNT_DISABLED') {
+          useAuthStore.getState().logout();
+        }
+        return response;
       }
     ]
   }
@@ -60,8 +76,40 @@ export async function loginWithCode(phone: string, code: string): Promise<AuthTo
   return api.post(apiUrl('/auth/login'), { json: { phone, code } }).json<AuthToken>();
 }
 
+export async function registerClient(input: ClientRegisterInput): Promise<AuthToken> {
+  return api.post(apiUrl('/auth/register/client'), { json: input }).json<AuthToken>();
+}
+
+export async function onboardLawyer(input: LawyerOnboardingInput): Promise<AuthToken> {
+  return api.post(apiUrl('/auth/onboard-lawyer'), { json: input }).json<AuthToken>();
+}
+
 export async function getMe(): Promise<User> {
   const response = await api.get(apiUrl('/me')).json<{ user: User }>();
+  return response.user;
+}
+
+export async function getAdminOverview(): Promise<AdminOverview> {
+  return api.get(apiUrl('/admin/overview')).json<AdminOverview>();
+}
+
+export async function getAdminUsers(): Promise<User[]> {
+  const response = await api.get(apiUrl('/admin/users')).json<{ users: User[] }>();
+  return response.users;
+}
+
+export async function updateAdminUser(userId: string, input: AdminUpdateUserInput): Promise<User> {
+  const response = await api.patch(apiUrl(`/admin/users/${userId}`), { json: input }).json<{ user: User }>();
+  return response.user;
+}
+
+export async function getAdminLawyerApplications(): Promise<User[]> {
+  const response = await api.get(apiUrl('/admin/lawyers')).json<{ lawyers: User[] }>();
+  return response.lawyers;
+}
+
+export async function reviewAdminLawyer(userId: string, input: AdminReviewLawyerInput): Promise<User> {
+  const response = await api.post(apiUrl(`/admin/lawyers/${userId}/review`), { json: input }).json<{ user: User }>();
   return response.user;
 }
 

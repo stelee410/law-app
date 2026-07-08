@@ -27,7 +27,7 @@ def _test_settings(**overrides) -> Settings:
 
 def test_minimal_case_workflow() -> None:
   client = TestClient(create_app(_test_settings()))
-  headers = _login(client)
+  headers = _register_client(client)
   case_id = _create_case(client, headers)
 
   upload = client.post(
@@ -74,8 +74,8 @@ def test_minimal_case_workflow() -> None:
 
 def test_plan_selection_is_idempotent_and_rejects_switching() -> None:
   client = TestClient(create_app(_test_settings()))
-  client_headers = _login(client, phone="13800001234")
-  lawyer_headers = _login(client, phone="13900009999")
+  client_headers = _register_client(client, phone="13800001234")
+  lawyer_headers = _create_approved_lawyer(client)
   case_id = _create_case(client, client_headers)
   assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
 
@@ -112,8 +112,8 @@ def test_plan_selection_is_idempotent_and_rejects_switching() -> None:
 
 def test_lawyer_review_document_closed_loop() -> None:
   client = TestClient(create_app(_test_settings()))
-  client_headers = _login(client, phone="13800001234")
-  lawyer_headers = _login(client, phone="13900009999")
+  client_headers = _register_client(client, phone="13800001234")
+  lawyer_headers = _create_approved_lawyer(client)
   case_id = _create_case(client, client_headers)
 
   upload = client.post(
@@ -255,8 +255,8 @@ def test_lawyer_review_document_closed_loop() -> None:
 
 def test_lawyer_can_read_case_evidence_file(tmp_path: Path) -> None:
   client = TestClient(create_app(_test_settings(UPLOAD_DIR=str(tmp_path))))
-  client_headers = _login(client, phone="13800001234")
-  lawyer_headers = _login(client, phone="13900009999")
+  client_headers = _register_client(client, phone="13800001234")
+  lawyer_headers = _create_approved_lawyer(client)
   case_id = _create_case(client, client_headers)
 
   upload = client.post(
@@ -298,7 +298,7 @@ def test_lawyer_can_read_case_evidence_file(tmp_path: Path) -> None:
 
 def test_assessment_failure_is_recorded_as_event(monkeypatch) -> None:
   client = TestClient(create_app(_test_settings()))
-  headers = _login(client)
+  headers = _register_client(client)
   case_id = _create_case(client, headers)
 
   def fail_assessment(_law_case):
@@ -320,14 +320,246 @@ def test_assessment_failure_is_recorded_as_event(monkeypatch) -> None:
   assert '"errorCode":"WORKFLOW_FAILED"' in event_body
 
 
+def test_client_registration_requires_consent_and_returns_session() -> None:
+  client = TestClient(create_app(_test_settings()))
+  code = _request_code(client, "13800001234")
+
+  missing_consent = client.post(
+    "/api/v1/auth/register/client",
+    json={
+      "phone": "13800001234",
+      "code": code,
+      "name": "王先生",
+      "acceptedTerms": True,
+      "acceptedPrivacy": False,
+    },
+  )
+  assert missing_consent.status_code == 422
+
+  registered = client.post(
+    "/api/v1/auth/register/client",
+    json={
+      "phone": "13800001234",
+      "code": code,
+      "name": "王先生",
+      "acceptedTerms": True,
+      "acceptedPrivacy": True,
+    },
+  )
+  assert registered.status_code == 200
+  body = registered.json()
+  assert body["token"]
+  assert body["user"]["role"] == "client"
+  assert body["user"]["accountStatus"] == "active"
+  assert body["user"]["lawyerReviewStatus"] == "none"
+
+
+def test_login_does_not_create_unknown_user() -> None:
+  client = TestClient(create_app(_test_settings()))
+  code = _request_code(client, "13800007777")
+
+  response = client.post("/api/v1/auth/login", json={"phone": "13800007777", "code": code})
+
+  assert response.status_code == 404
+  assert response.json()["detail"] == "USER_NOT_FOUND"
+
+
+def test_lawyer_onboarding_keeps_pending_lawyer_out_of_lawyer_apis() -> None:
+  client = TestClient(create_app(_test_settings()))
+  headers = _onboard_lawyer(client, phone="13900008888")
+
+  me_response = client.get("/api/v1/me", headers=headers)
+  assert me_response.status_code == 200
+  assert me_response.json()["user"]["lawyerReviewStatus"] == "pending_review"
+
+  tasks_response = client.get("/api/v1/lawyer/tasks", headers=headers)
+  assert tasks_response.status_code == 403
+  assert tasks_response.json()["detail"] == "LAWYER_NOT_APPROVED"
+
+
+def test_admin_approval_enables_lawyer_access() -> None:
+  client = TestClient(create_app(_test_settings(ADMIN_PHONE="13600000000", ADMIN_NAME="平台管理员")))
+  lawyer_headers = _onboard_lawyer(client, phone="13900008888")
+  admin_headers = _login(client, phone="13600000000")
+  lawyer_id = client.get("/api/v1/me", headers=lawyer_headers).json()["user"]["id"]
+
+  approved = client.post(
+    f"/api/v1/admin/lawyers/{lawyer_id}/review",
+    headers=admin_headers,
+    json={"status": "approved"},
+  )
+  assert approved.status_code == 200
+  assert approved.json()["user"]["lawyerReviewStatus"] == "approved"
+
+  tasks_response = client.get("/api/v1/lawyer/tasks", headers=lawyer_headers)
+  assert tasks_response.status_code == 200
+
+
+def test_admin_rejection_stores_reason_and_rejected_lawyer_is_denied() -> None:
+  client = TestClient(create_app(_test_settings(ADMIN_PHONE="13600000000", ADMIN_NAME="平台管理员")))
+  lawyer_headers = _onboard_lawyer(client, phone="13900008888")
+  admin_headers = _login(client, phone="13600000000")
+  lawyer_id = client.get("/api/v1/me", headers=lawyer_headers).json()["user"]["id"]
+
+  rejected = client.post(
+    f"/api/v1/admin/lawyers/{lawyer_id}/review",
+    headers=admin_headers,
+    json={"status": "rejected", "rejectedReason": "执业证号无法核验"},
+  )
+  assert rejected.status_code == 200
+  assert rejected.json()["user"]["lawyerReviewStatus"] == "rejected"
+  assert rejected.json()["user"]["rejectedReason"] == "执业证号无法核验"
+
+  me_response = client.get("/api/v1/me", headers=lawyer_headers)
+  assert me_response.status_code == 200
+  assert me_response.json()["user"]["rejectedReason"] == "执业证号无法核验"
+
+  tasks_response = client.get("/api/v1/lawyer/tasks", headers=lawyer_headers)
+  assert tasks_response.status_code == 403
+  assert tasks_response.json()["detail"] == "LAWYER_REJECTED"
+
+
+def test_admin_can_disable_user_and_disabled_token_is_rejected() -> None:
+  client = TestClient(create_app(_test_settings(ADMIN_PHONE="13600000000", ADMIN_NAME="平台管理员")))
+  client_headers = _register_client(client, phone="13800001234")
+  admin_headers = _login(client, phone="13600000000")
+  user_id = client.get("/api/v1/me", headers=client_headers).json()["user"]["id"]
+
+  disabled = client.patch(
+    f"/api/v1/admin/users/{user_id}",
+    headers=admin_headers,
+    json={"accountStatus": "disabled"},
+  )
+  assert disabled.status_code == 200
+  assert disabled.json()["user"]["accountStatus"] == "disabled"
+
+  me_response = client.get("/api/v1/me", headers=client_headers)
+  assert me_response.status_code == 403
+  assert me_response.json()["detail"] == "ACCOUNT_DISABLED"
+
+
+def test_disabled_users_cannot_restore_through_public_registration_or_onboarding() -> None:
+  client = TestClient(create_app(_test_settings(ADMIN_PHONE="13600000000", ADMIN_NAME="平台管理员")))
+  admin_headers = _login(client, phone="13600000000")
+  client_headers = _register_client(client, phone="13800001234")
+  second_client_headers = _register_client(client, phone="13800005678", name="李女士")
+  client_user_id = client.get("/api/v1/me", headers=client_headers).json()["user"]["id"]
+  second_user_id = client.get("/api/v1/me", headers=second_client_headers).json()["user"]["id"]
+
+  for user_id in [client_user_id, second_user_id]:
+    disabled = client.patch(
+      f"/api/v1/admin/users/{user_id}",
+      headers=admin_headers,
+      json={"accountStatus": "disabled"},
+    )
+    assert disabled.status_code == 200
+
+  register_code = _request_code(client, "13800001234")
+  register_response = client.post(
+    "/api/v1/auth/register/client",
+    json={
+      "phone": "13800001234",
+      "code": register_code,
+      "name": "王先生",
+      "acceptedTerms": True,
+      "acceptedPrivacy": True,
+    },
+  )
+  assert register_response.status_code == 403
+  assert register_response.json()["detail"] == "ACCOUNT_DISABLED"
+
+  onboard_code = _request_code(client, "13800005678")
+  onboard_response = client.post(
+    "/api/v1/auth/onboard-lawyer",
+    json={
+      "phone": "13800005678",
+      "code": onboard_code,
+      "name": "李律师",
+      "lawFirm": "上海正衡律师事务所",
+      "licenseNumber": "13101202010123456",
+      "practiceRegion": "上海",
+      "specialties": ["合同纠纷"],
+      "acceptedTerms": True,
+      "acceptedPrivacy": True,
+    },
+  )
+  assert onboard_response.status_code == 403
+  assert onboard_response.json()["detail"] == "ACCOUNT_DISABLED"
+
+
+def test_admin_role_updates_and_final_active_admin_protection() -> None:
+  client = TestClient(create_app(_test_settings(ADMIN_PHONE="13600000000", ADMIN_NAME="平台管理员")))
+  admin_headers = _login(client, phone="13600000000")
+  admin_user = client.get("/api/v1/me", headers=admin_headers).json()["user"]
+  client_headers = _register_client(client, phone="13800001234")
+  client_user_id = client.get("/api/v1/me", headers=client_headers).json()["user"]["id"]
+
+  promoted = client.patch(
+    f"/api/v1/admin/users/{client_user_id}",
+    headers=admin_headers,
+    json={"role": "admin"},
+  )
+  assert promoted.status_code == 200
+  assert promoted.json()["user"]["role"] == "admin"
+
+  demoted = client.patch(
+    f"/api/v1/admin/users/{client_user_id}",
+    headers=admin_headers,
+    json={"role": "client"},
+  )
+  assert demoted.status_code == 200
+
+  final_admin_demote = client.patch(
+    f"/api/v1/admin/users/{admin_user['id']}",
+    headers=admin_headers,
+    json={"role": "client"},
+  )
+  assert final_admin_demote.status_code == 409
+  assert final_admin_demote.json()["detail"] == "LAST_ADMIN_REQUIRED"
+
+  final_admin_disable = client.patch(
+    f"/api/v1/admin/users/{admin_user['id']}",
+    headers=admin_headers,
+    json={"accountStatus": "disabled"},
+  )
+  assert final_admin_disable.status_code == 409
+  assert final_admin_disable.json()["detail"] == "LAST_ADMIN_REQUIRED"
+
+
+def test_admin_cannot_be_changed_to_lawyer_through_public_onboarding() -> None:
+  client = TestClient(create_app(_test_settings(ADMIN_PHONE="13600000000", ADMIN_NAME="平台管理员")))
+  admin_headers = _login(client, phone="13600000000")
+  admin_before = client.get("/api/v1/me", headers=admin_headers).json()["user"]
+  assert admin_before["role"] == "admin"
+
+  code = _request_code(client, "13600000000")
+  response = client.post(
+    "/api/v1/auth/onboard-lawyer",
+    json={
+      "phone": "13600000000",
+      "code": code,
+      "name": "平台管理员",
+      "lawFirm": "北京中正律师事务所",
+      "licenseNumber": "11101202010123456",
+      "practiceRegion": "北京",
+      "specialties": ["平台运营"],
+      "acceptedTerms": True,
+      "acceptedPrivacy": True,
+    },
+  )
+  assert response.status_code == 403
+  assert response.json()["detail"] == "FORBIDDEN"
+
+  admin_after = client.get("/api/v1/me", headers=admin_headers).json()["user"]
+  assert admin_after["role"] == "admin"
+
+
 def _login(client: TestClient, phone: str = "13800001234") -> dict[str, str]:
-  code_response = client.post("/api/v1/auth/request-code", json={"phone": phone})
-  assert code_response.status_code == 200
-  assert code_response.json()["mockCode"] == "654321"
+  code = _request_code(client, phone)
 
   login_response = client.post(
     "/api/v1/auth/login",
-    json={"phone": phone, "code": code_response.json()["mockCode"]},
+    json={"phone": phone, "code": code},
   )
   assert login_response.status_code == 200
   token = login_response.json()["token"]
@@ -337,6 +569,68 @@ def _login(client: TestClient, phone: str = "13800001234") -> dict[str, str]:
   assert me_response.status_code == 200
   assert me_response.json()["user"]["phone"] == phone
   return headers
+
+
+def _request_code(client: TestClient, phone: str) -> str:
+  code_response = client.post("/api/v1/auth/request-code", json={"phone": phone})
+  assert code_response.status_code == 200
+  assert code_response.json()["mockCode"] == "654321"
+  return code_response.json()["mockCode"]
+
+
+def _register_client(client: TestClient, phone: str = "13800001234", name: str = "王先生") -> dict[str, str]:
+  code = _request_code(client, phone)
+  response = client.post(
+    "/api/v1/auth/register/client",
+    json={
+      "phone": phone,
+      "code": code,
+      "name": name,
+      "acceptedTerms": True,
+      "acceptedPrivacy": True,
+    },
+  )
+  assert response.status_code == 200
+  token = response.json()["token"]
+  return {"Authorization": f"Bearer {token}"}
+
+
+def _onboard_lawyer(client: TestClient, phone: str = "13900008888") -> dict[str, str]:
+  code = _request_code(client, phone)
+  response = client.post(
+    "/api/v1/auth/onboard-lawyer",
+    json={
+      "phone": phone,
+      "code": code,
+      "name": "赵律师",
+      "lawFirm": "北京中正律师事务所",
+      "licenseNumber": "11101202010123456",
+      "practiceRegion": "北京",
+      "specialties": ["合同纠纷", "债务催收"],
+      "acceptedTerms": True,
+      "acceptedPrivacy": True,
+    },
+  )
+  assert response.status_code == 200
+  token = response.json()["token"]
+  return {"Authorization": f"Bearer {token}"}
+
+
+def _create_approved_lawyer(client: TestClient, phone: str = "13900008888") -> dict[str, str]:
+  settings = client.app.state.settings
+  admin_phone = settings.ADMIN_PHONE or "13600000000"
+  admin_name = settings.ADMIN_NAME or "平台管理员"
+  client.app.state.store.create_admin(admin_phone, admin_name)
+  lawyer_headers = _onboard_lawyer(client, phone=phone)
+  admin_headers = _login(client, phone=admin_phone)
+  lawyer_id = client.get("/api/v1/me", headers=lawyer_headers).json()["user"]["id"]
+  response = client.post(
+    f"/api/v1/admin/lawyers/{lawyer_id}/review",
+    headers=admin_headers,
+    json={"status": "approved"},
+  )
+  assert response.status_code == 200
+  return lawyer_headers
 
 
 def _create_case(client: TestClient, headers: dict[str, str]) -> str:

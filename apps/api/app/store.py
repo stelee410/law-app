@@ -21,12 +21,16 @@ from app.schemas import (
   AuthToken,
   CaseEvent,
   CaseEventType,
+  AdminReviewLawyerInput,
+  AdminUpdateUserInput,
+  ClientRegisterInput,
   CaseStage,
   CreateCaseInput,
   CreateDocumentInput,
   EvidenceCategory,
   EvidenceFile,
   LawCase,
+  LawyerOnboardingInput,
   LegalDocument,
   NotificationMessage,
   PlanId,
@@ -43,12 +47,36 @@ class InvalidStateError(Exception):
   pass
 
 
+class AccountDisabledError(Exception):
+  pass
+
+
+class LastAdminRequiredError(Exception):
+  pass
+
+
+class RoleChangeForbiddenError(Exception):
+  pass
+
+
+class UserNotFoundError(Exception):
+  pass
+
+
 class AppStore(Protocol):
   settings: Settings
 
   def request_login_code(self, phone: str) -> dict[str, str]: ...
   def login_with_code(self, phone: str, code: str) -> AuthToken | None: ...
+  def register_client(self, input_data: ClientRegisterInput) -> AuthToken | None: ...
+  def onboard_lawyer(self, input_data: LawyerOnboardingInput) -> AuthToken | None: ...
   def get_user_by_token(self, token: str) -> User | None: ...
+  def create_admin(self, phone: str, name: str) -> User: ...
+  def list_admin_users(self) -> list[User]: ...
+  def update_user_admin(self, user_id: str, input_data: AdminUpdateUserInput) -> User | None: ...
+  def list_lawyer_applications(self) -> list[User]: ...
+  def review_lawyer_application(self, user_id: str, input_data: AdminReviewLawyerInput) -> User | None: ...
+  def list_admin_cases(self) -> list[LawCase]: ...
   def list_cases(self, user_id: str) -> list[LawCase]: ...
   def get_case(self, user_id: str, case_id: str) -> LawCase | None: ...
   def create_case(self, user_id: str, input_data: CreateCaseInput) -> LawCase: ...
@@ -139,11 +167,81 @@ class InMemoryStore:
     if expected_code != code or expires_at < _now():
       return None
 
-    user = self._get_or_create_user(normalized_phone)
-    token = _create_token()
-    session_expires_at = _now() + timedelta(days=self.settings.TOKEN_EXPIRE_DAYS)
-    self._sessions[token] = (user.id, session_expires_at)
-    return AuthToken(token=token, user=user, expiresAt=_iso(session_expires_at))
+    user = self._users_by_phone.get(normalized_phone)
+    if user is None:
+      raise UserNotFoundError("USER_NOT_FOUND")
+    if user.accountStatus == "disabled":
+      raise AccountDisabledError("ACCOUNT_DISABLED")
+    return self._create_session(user)
+
+  def register_client(self, input_data: ClientRegisterInput) -> AuthToken | None:
+    normalized_phone = _normalize_phone(input_data.phone)
+    if not self._verify_otp(normalized_phone, input_data.code):
+      return None
+    user = self._users_by_phone.get(normalized_phone)
+    now = _iso(_now())
+    if user is None:
+      user = User(
+        id=f"user-{uuid4().hex[:8]}",
+        phone=normalized_phone,
+        name=input_data.name,
+        role="client",
+        accountStatus="active",
+        lawyerReviewStatus="none",
+        createdAt=now,
+        updatedAt=now,
+      )
+    else:
+      if user.accountStatus == "disabled":
+        raise AccountDisabledError("ACCOUNT_DISABLED")
+      user.name = input_data.name
+      if user.role == "client":
+        user.role = "client"
+        user.lawyerReviewStatus = "none"
+        user.rejectedReason = None
+      user.updatedAt = now
+    self._users_by_phone[normalized_phone] = user
+    self._users_by_id[user.id] = user
+    return self._create_session(user)
+
+  def onboard_lawyer(self, input_data: LawyerOnboardingInput) -> AuthToken | None:
+    normalized_phone = _normalize_phone(input_data.phone)
+    if not self._verify_otp(normalized_phone, input_data.code):
+      return None
+    user = self._users_by_phone.get(normalized_phone)
+    now = _iso(_now())
+    if user is None:
+      user = User(
+        id=f"user-{uuid4().hex[:8]}",
+        phone=normalized_phone,
+        name=input_data.name,
+        role="lawyer",
+        accountStatus="active",
+        lawyerReviewStatus="pending_review",
+        lawFirm=input_data.lawFirm,
+        licenseNumber=input_data.licenseNumber,
+        practiceRegion=input_data.practiceRegion,
+        specialties=input_data.specialties,
+        createdAt=now,
+        updatedAt=now,
+      )
+    else:
+      if user.accountStatus == "disabled":
+        raise AccountDisabledError("ACCOUNT_DISABLED")
+      if user.role == "admin":
+        raise RoleChangeForbiddenError("FORBIDDEN")
+      user.name = input_data.name
+      user.role = "lawyer"
+      user.lawyerReviewStatus = "pending_review"
+      user.rejectedReason = None
+      user.lawFirm = input_data.lawFirm
+      user.licenseNumber = input_data.licenseNumber
+      user.practiceRegion = input_data.practiceRegion
+      user.specialties = input_data.specialties
+      user.updatedAt = now
+    self._users_by_phone[normalized_phone] = user
+    self._users_by_id[user.id] = user
+    return self._create_session(user)
 
   def get_user_by_token(self, token: str) -> User | None:
     session = self._sessions.get(token)
@@ -154,6 +252,71 @@ class InMemoryStore:
       self._sessions.pop(token, None)
       return None
     return self._users_by_id.get(user_id)
+
+  def create_admin(self, phone: str, name: str) -> User:
+    normalized_phone = _normalize_phone(phone)
+    user = self._users_by_phone.get(normalized_phone)
+    now = _iso(_now())
+    if user is None:
+      user = User(
+        id=f"user-{uuid4().hex[:8]}",
+        phone=normalized_phone,
+        name=name,
+        role="admin",
+        accountStatus="active",
+        lawyerReviewStatus="none",
+        createdAt=now,
+        updatedAt=now,
+      )
+    else:
+      user.name = name
+      user.role = "admin"
+      user.accountStatus = "active"
+      user.lawyerReviewStatus = "none"
+      user.rejectedReason = None
+      user.updatedAt = now
+    self._users_by_phone[normalized_phone] = user
+    self._users_by_id[user.id] = user
+    return user
+
+  def list_admin_users(self) -> list[User]:
+    return sorted(self._users_by_id.values(), key=lambda item: item.createdAt, reverse=True)
+
+  def update_user_admin(self, user_id: str, input_data: AdminUpdateUserInput) -> User | None:
+    user = self._users_by_id.get(user_id)
+    if user is None:
+      return None
+    if self._would_remove_final_admin(user, input_data):
+      raise LastAdminRequiredError("LAST_ADMIN_REQUIRED")
+    if input_data.role is not None:
+      user.role = input_data.role
+      if input_data.role == "lawyer":
+        if user.lawyerReviewStatus == "none":
+          user.lawyerReviewStatus = "approved"
+      else:
+        user.lawyerReviewStatus = "none"
+        user.rejectedReason = None
+    if input_data.accountStatus is not None:
+      user.accountStatus = input_data.accountStatus
+    user.updatedAt = _iso(_now())
+    return user
+
+  def list_lawyer_applications(self) -> list[User]:
+    users = [user for user in self._users_by_id.values() if user.role == "lawyer" and user.lawyerReviewStatus != "none"]
+    return sorted(users, key=lambda item: item.updatedAt or item.createdAt, reverse=True)
+
+  def review_lawyer_application(self, user_id: str, input_data: AdminReviewLawyerInput) -> User | None:
+    user = self._users_by_id.get(user_id)
+    if user is None or user.role != "lawyer":
+      return None
+    user.lawyerReviewStatus = input_data.status
+    user.rejectedReason = input_data.rejectedReason if input_data.status == "rejected" else None
+    user.accountStatus = "active"
+    user.updatedAt = _iso(_now())
+    return user
+
+  def list_admin_cases(self) -> list[LawCase]:
+    return sorted(self._cases.values(), key=lambda item: item.createdAt, reverse=True)
 
   def list_cases(self, user_id: str) -> list[LawCase]:
     cases = [case for case in self._cases.values() if case.userId == user_id]
@@ -565,6 +728,32 @@ class InMemoryStore:
     self._users_by_id[user.id] = user
     return user
 
+  def _verify_otp(self, phone: str, code: str) -> bool:
+    otp = self._otps.get(phone)
+    if otp is None:
+      return False
+    expected_code, expires_at = otp
+    return expected_code == code and expires_at >= _now()
+
+  def _create_session(self, user: User) -> AuthToken:
+    token = _create_token()
+    session_expires_at = _now() + timedelta(days=self.settings.TOKEN_EXPIRE_DAYS)
+    self._sessions[token] = (user.id, session_expires_at)
+    return AuthToken(token=token, user=user, expiresAt=_iso(session_expires_at))
+
+  def _would_remove_final_admin(self, user: User, input_data: AdminUpdateUserInput) -> bool:
+    if user.role != "admin" or user.accountStatus != "active":
+      return False
+    will_stop_being_admin = input_data.role is not None and input_data.role != "admin"
+    will_be_disabled = input_data.accountStatus == "disabled"
+    if not will_stop_being_admin and not will_be_disabled:
+      return False
+    active_admins = [
+      item for item in self._users_by_id.values()
+      if item.id != user.id and item.role == "admin" and item.accountStatus == "active"
+    ]
+    return not active_admins
+
   def _record_event(
     self,
     case_id: str,
@@ -628,16 +817,16 @@ class InMemoryStore:
 
   def _notify_lawyers(self, title: str, body: str, action_href: str, case_id: str | None = None) -> None:
     for user in self._users_by_id.values():
-      if user.role == "lawyer":
+      if _is_active_approved_lawyer(user):
         self._create_message(user.id, "task", title, body, action_href, case_id)
 
   def _first_lawyer_id(self) -> str | None:
-    lawyer = next((user for user in self._users_by_id.values() if user.role == "lawyer"), None)
+    lawyer = next((user for user in self._users_by_id.values() if _is_active_approved_lawyer(user)), None)
     return lawyer.id if lawyer is not None else None
 
   def _is_lawyer(self, user_id: str) -> bool:
     user = self._users_by_id.get(user_id)
-    return user is not None and user.role == "lawyer"
+    return user is not None and _is_active_approved_lawyer(user)
 
 
 class PostgresStore:
@@ -672,7 +861,15 @@ class PostgresStore:
         if otp is None or otp["code"] != code or _parse_iso(otp["expires_at"]) < _now():
           conn.rollback()
           return None
-        user = self._get_or_create_user(cursor, normalized_phone)
+        cursor.execute("SELECT * FROM users WHERE phone = %s", (normalized_phone,))
+        user_row = cursor.fetchone()
+        if user_row is None:
+          conn.rollback()
+          raise UserNotFoundError("USER_NOT_FOUND")
+        user = _user_from_row(user_row)
+        if user.accountStatus == "disabled":
+          conn.rollback()
+          raise AccountDisabledError("ACCOUNT_DISABLED")
         token = _create_token()
         expires_at = _now() + timedelta(days=self.settings.TOKEN_EXPIRE_DAYS)
         cursor.execute(
@@ -682,12 +879,98 @@ class PostgresStore:
       conn.commit()
     return AuthToken(token=token, user=user, expiresAt=_iso(expires_at))
 
+  def register_client(self, input_data: ClientRegisterInput) -> AuthToken | None:
+    normalized_phone = _normalize_phone(input_data.phone)
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        if not self._verify_otp(cursor, normalized_phone, input_data.code):
+          conn.rollback()
+          return None
+        cursor.execute("SELECT * FROM users WHERE phone = %s", (normalized_phone,))
+        existing = cursor.fetchone()
+        now = _iso(_now())
+        if existing is None:
+          user = User(
+            id=f"user-{uuid4().hex[:8]}",
+            phone=normalized_phone,
+            name=input_data.name,
+            role="client",
+            accountStatus="active",
+            lawyerReviewStatus="none",
+            createdAt=now,
+            updatedAt=now,
+          )
+          self._insert_user(cursor, user)
+        else:
+          user = _user_from_row(existing)
+          if user.accountStatus == "disabled":
+            conn.rollback()
+            raise AccountDisabledError("ACCOUNT_DISABLED")
+          user.name = input_data.name
+          if user.role == "client":
+            user.role = "client"
+            user.lawyerReviewStatus = "none"
+            user.rejectedReason = None
+          user.updatedAt = now
+          self._update_user_row(cursor, user)
+        token, expires_at = self._insert_session(cursor, user.id)
+      conn.commit()
+    return AuthToken(token=token, user=user, expiresAt=_iso(expires_at))
+
+  def onboard_lawyer(self, input_data: LawyerOnboardingInput) -> AuthToken | None:
+    normalized_phone = _normalize_phone(input_data.phone)
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        if not self._verify_otp(cursor, normalized_phone, input_data.code):
+          conn.rollback()
+          return None
+        cursor.execute("SELECT * FROM users WHERE phone = %s", (normalized_phone,))
+        existing = cursor.fetchone()
+        now = _iso(_now())
+        if existing is None:
+          user = User(
+            id=f"user-{uuid4().hex[:8]}",
+            phone=normalized_phone,
+            name=input_data.name,
+            role="lawyer",
+            accountStatus="active",
+            lawyerReviewStatus="pending_review",
+            lawFirm=input_data.lawFirm,
+            licenseNumber=input_data.licenseNumber,
+            practiceRegion=input_data.practiceRegion,
+            specialties=input_data.specialties,
+            createdAt=now,
+            updatedAt=now,
+          )
+          self._insert_user(cursor, user)
+        else:
+          user = _user_from_row(existing)
+          if user.accountStatus == "disabled":
+            conn.rollback()
+            raise AccountDisabledError("ACCOUNT_DISABLED")
+          if user.role == "admin":
+            conn.rollback()
+            raise RoleChangeForbiddenError("FORBIDDEN")
+          user.name = input_data.name
+          user.role = "lawyer"
+          user.lawyerReviewStatus = "pending_review"
+          user.rejectedReason = None
+          user.lawFirm = input_data.lawFirm
+          user.licenseNumber = input_data.licenseNumber
+          user.practiceRegion = input_data.practiceRegion
+          user.specialties = input_data.specialties
+          user.updatedAt = now
+          self._update_user_row(cursor, user)
+        token, expires_at = self._insert_session(cursor, user.id)
+      conn.commit()
+    return AuthToken(token=token, user=user, expiresAt=_iso(expires_at))
+
   def get_user_by_token(self, token: str) -> User | None:
     with self.database.connection() as conn:
       with conn.cursor(row_factory=dict_row) as cursor:
         cursor.execute(
           """
-          SELECT users.id, users.phone, users.name, users.role, users.created_at, sessions.expires_at
+          SELECT users.*, sessions.expires_at AS session_expires_at
           FROM sessions
           JOIN users ON users.id = sessions.user_id
           WHERE sessions.token = %s
@@ -698,12 +981,118 @@ class PostgresStore:
         if row is None:
           conn.rollback()
           return None
-        if _parse_iso(row["expires_at"]) < _now():
+        if _parse_iso(row["session_expires_at"]) < _now():
           cursor.execute("DELETE FROM sessions WHERE token = %s", (token,))
           conn.commit()
           return None
       conn.rollback()
     return _user_from_row(row)
+
+  def create_admin(self, phone: str, name: str) -> User:
+    normalized_phone = _normalize_phone(phone)
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute("SELECT * FROM users WHERE phone = %s", (normalized_phone,))
+        row = cursor.fetchone()
+        now = _iso(_now())
+        if row is None:
+          user = User(
+            id=f"user-{uuid4().hex[:8]}",
+            phone=normalized_phone,
+            name=name,
+            role="admin",
+            accountStatus="active",
+            lawyerReviewStatus="none",
+            createdAt=now,
+            updatedAt=now,
+          )
+          self._insert_user(cursor, user)
+        else:
+          user = _user_from_row(row)
+          user.name = name
+          user.role = "admin"
+          user.accountStatus = "active"
+          user.lawyerReviewStatus = "none"
+          user.rejectedReason = None
+          user.updatedAt = now
+          self._update_user_row(cursor, user)
+      conn.commit()
+    return user
+
+  def list_admin_users(self) -> list[User]:
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+      conn.rollback()
+    return [_user_from_row(row) for row in rows]
+
+  def update_user_admin(self, user_id: str, input_data: AdminUpdateUserInput) -> User | None:
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+        row = cursor.fetchone()
+        if row is None:
+          conn.rollback()
+          return None
+        user = _user_from_row(row)
+        if self._would_remove_final_admin(cursor, user, input_data):
+          conn.rollback()
+          raise LastAdminRequiredError("LAST_ADMIN_REQUIRED")
+        if input_data.role is not None:
+          user.role = input_data.role
+          if input_data.role == "lawyer":
+            if user.lawyerReviewStatus == "none":
+              user.lawyerReviewStatus = "approved"
+          else:
+            user.lawyerReviewStatus = "none"
+            user.rejectedReason = None
+        if input_data.accountStatus is not None:
+          user.accountStatus = input_data.accountStatus
+        user.updatedAt = _iso(_now())
+        self._update_user_row(cursor, user)
+      conn.commit()
+    return user
+
+  def list_lawyer_applications(self) -> list[User]:
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(
+          """
+          SELECT * FROM users
+          WHERE role = 'lawyer' AND lawyer_review_status <> 'none'
+          ORDER BY COALESCE(updated_at, created_at) DESC
+          """
+        )
+        rows = cursor.fetchall()
+      conn.rollback()
+    return [_user_from_row(row) for row in rows]
+
+  def review_lawyer_application(self, user_id: str, input_data: AdminReviewLawyerInput) -> User | None:
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute("SELECT * FROM users WHERE id = %s AND role = 'lawyer'", (user_id,))
+        row = cursor.fetchone()
+        if row is None:
+          conn.rollback()
+          return None
+        user = _user_from_row(row)
+        user.lawyerReviewStatus = input_data.status
+        user.rejectedReason = input_data.rejectedReason if input_data.status == "rejected" else None
+        user.accountStatus = "active"
+        user.updatedAt = _iso(_now())
+        self._update_user_row(cursor, user)
+      conn.commit()
+    return user
+
+  def list_admin_cases(self) -> list[LawCase]:
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute("SELECT * FROM cases ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        cases = [self._case_from_row(cursor, row) for row in rows]
+      conn.rollback()
+    return cases
 
   def list_cases(self, user_id: str) -> list[LawCase]:
     with self.database.connection() as conn:
@@ -1282,11 +1671,90 @@ class PostgresStore:
     if row is not None:
       return _user_from_row(row)
     user = _new_user(phone)
-    cursor.execute(
-      "INSERT INTO users (id, phone, name, role, created_at) VALUES (%s, %s, %s, %s, %s)",
-      (user.id, user.phone, user.name, user.role, user.createdAt),
-    )
+    self._insert_user(cursor, user)
     return user
+
+  def _verify_otp(self, cursor, phone: str, code: str) -> bool:
+    cursor.execute("SELECT code, expires_at FROM otp_codes WHERE phone = %s", (phone,))
+    otp = cursor.fetchone()
+    return otp is not None and otp["code"] == code and _parse_iso(otp["expires_at"]) >= _now()
+
+  def _insert_session(self, cursor, user_id: str) -> tuple[str, datetime]:
+    token = _create_token()
+    expires_at = _now() + timedelta(days=self.settings.TOKEN_EXPIRE_DAYS)
+    cursor.execute(
+      "INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (%s, %s, %s, %s)",
+      (token, user_id, _iso(expires_at), _iso(_now())),
+    )
+    return token, expires_at
+
+  def _insert_user(self, cursor, user: User) -> None:
+    cursor.execute(
+      """
+      INSERT INTO users (
+        id, phone, name, role, account_status, lawyer_review_status, rejected_reason,
+        law_firm, license_number, practice_region, specialties_json, created_at, updated_at
+      )
+      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+      """,
+      (
+        user.id,
+        user.phone,
+        user.name,
+        user.role,
+        user.accountStatus,
+        user.lawyerReviewStatus,
+        user.rejectedReason,
+        user.lawFirm,
+        user.licenseNumber,
+        user.practiceRegion,
+        Jsonb(user.specialties),
+        user.createdAt,
+        user.updatedAt or user.createdAt,
+      ),
+    )
+
+  def _update_user_row(self, cursor, user: User) -> None:
+    cursor.execute(
+      """
+      UPDATE users
+      SET name = %s, role = %s, account_status = %s, lawyer_review_status = %s,
+        rejected_reason = %s, law_firm = %s, license_number = %s, practice_region = %s,
+        specialties_json = %s, updated_at = %s
+      WHERE id = %s
+      """,
+      (
+        user.name,
+        user.role,
+        user.accountStatus,
+        user.lawyerReviewStatus,
+        user.rejectedReason,
+        user.lawFirm,
+        user.licenseNumber,
+        user.practiceRegion,
+        Jsonb(user.specialties),
+        user.updatedAt or _iso(_now()),
+        user.id,
+      ),
+    )
+
+  def _would_remove_final_admin(self, cursor, user: User, input_data: AdminUpdateUserInput) -> bool:
+    if user.role != "admin" or user.accountStatus != "active":
+      return False
+    will_stop_being_admin = input_data.role is not None and input_data.role != "admin"
+    will_be_disabled = input_data.accountStatus == "disabled"
+    if not will_stop_being_admin and not will_be_disabled:
+      return False
+    cursor.execute(
+      """
+      SELECT COUNT(*) AS active_admins
+      FROM users
+      WHERE id <> %s AND role = 'admin' AND account_status = 'active'
+      """,
+      (user.id,),
+    )
+    row = cursor.fetchone()
+    return row["active_admins"] == 0
 
   def _case_from_row(self, cursor, row: dict[str, Any]) -> LawCase:
     case_type = normalize_case_type(row.get("case_type"))
@@ -1468,17 +1936,29 @@ class PostgresStore:
     self._notify_lawyers(cursor, "新的律师复核待办", task.summary, f"/lawyer/tasks/{task.id}", law_case.id)
 
   def _is_lawyer(self, cursor, user_id: str) -> bool:
-    cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+    cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
     row = cursor.fetchone()
-    return row is not None and row["role"] == "lawyer"
+    return row is not None and _is_active_approved_lawyer(_user_from_row(row))
 
   def _first_lawyer_id(self, cursor) -> str | None:
-    cursor.execute("SELECT id FROM users WHERE role = 'lawyer' ORDER BY created_at ASC LIMIT 1")
+    cursor.execute(
+      """
+      SELECT id FROM users
+      WHERE role = 'lawyer' AND account_status = 'active' AND lawyer_review_status = 'approved'
+      ORDER BY created_at ASC
+      LIMIT 1
+      """
+    )
     row = cursor.fetchone()
     return row["id"] if row is not None else None
 
   def _notify_lawyers(self, cursor, title: str, body: str, action_href: str, case_id: str | None = None) -> None:
-    cursor.execute("SELECT id FROM users WHERE role = 'lawyer'")
+    cursor.execute(
+      """
+      SELECT id FROM users
+      WHERE role = 'lawyer' AND account_status = 'active' AND lawyer_review_status = 'approved'
+      """
+    )
     for row in cursor.fetchall():
       self._insert_message(cursor, _new_message(row["id"], "task", title, body, action_href, case_id))
 
@@ -1653,9 +2133,21 @@ def _new_case(user_id: str, input_data: CreateCaseInput) -> LawCase:
 
 
 def _new_user(phone: str) -> User:
-  role = "lawyer" if phone.endswith("9999") else "client"
-  name = f"律师{phone[-4:]}" if role == "lawyer" else f"用户{phone[-4:]}"
-  return User(id=f"user-{uuid4().hex[:8]}", phone=phone, name=name, role=role, createdAt=_iso(_now()))
+  now = _iso(_now())
+  return User(
+    id=f"user-{uuid4().hex[:8]}",
+    phone=phone,
+    name=f"用户{phone[-4:]}",
+    role="client",
+    accountStatus="active",
+    lawyerReviewStatus="none",
+    createdAt=now,
+    updatedAt=now,
+  )
+
+
+def _is_active_approved_lawyer(user: User) -> bool:
+  return user.role == "lawyer" and user.accountStatus == "active" and user.lawyerReviewStatus == "approved"
 
 
 def _new_evidence_file(file_name: str, file_size: int, mime_type: str) -> EvidenceFile:
@@ -1798,7 +2290,21 @@ def _mark_stage_for_document(law_case: LawCase, document_type: str) -> None:
 
 
 def _user_from_row(row: dict[str, Any]) -> User:
-  return User(id=row["id"], phone=row["phone"], name=row["name"], role=row.get("role") or "client", createdAt=row["created_at"])
+  return User(
+    id=row["id"],
+    phone=row["phone"],
+    name=row["name"],
+    role=row.get("role") or "client",
+    accountStatus=row.get("account_status") or "active",
+    lawyerReviewStatus=row.get("lawyer_review_status") or ("approved" if row.get("role") == "lawyer" else "none"),
+    rejectedReason=row.get("rejected_reason"),
+    lawFirm=row.get("law_firm"),
+    licenseNumber=row.get("license_number"),
+    practiceRegion=row.get("practice_region"),
+    specialties=row.get("specialties_json") or [],
+    createdAt=row["created_at"],
+    updatedAt=row.get("updated_at") or row["created_at"],
+  )
 
 
 def _event_from_row(row: dict[str, Any]) -> CaseEvent:

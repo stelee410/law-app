@@ -23,6 +23,8 @@ def create_store(settings: Settings) -> tuple[AppStore, Database | None]:
 def create_app(settings: Settings | None = None) -> FastAPI:
   resolved_settings = settings or Settings()
   store, database = create_store(resolved_settings)
+  if resolved_settings.ADMIN_PHONE and resolved_settings.ADMIN_NAME:
+    store.create_admin(resolved_settings.ADMIN_PHONE, resolved_settings.ADMIN_NAME)
 
   @asynccontextmanager
   async def lifespan(app: FastAPI) -> AsyncIterator[None]:

@@ -53,7 +53,9 @@ export type CaseStage = {
 };
 
 export type PlanId = 'self-service' | 'lawyer-review' | 'full-service';
-export type UserRole = 'client' | 'lawyer';
+export type UserRole = 'client' | 'lawyer' | 'admin';
+export type AccountStatus = 'active' | 'disabled';
+export type LawyerReviewStatus = 'none' | 'pending_review' | 'approved' | 'rejected';
 export type WorkItemKind = 'ai_guidance' | 'lawyer_review' | 'document_draft' | 'document_revision';
 export type WorkItemStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 export type RiskLevel = 'low' | 'medium' | 'high';
@@ -125,7 +127,15 @@ export type User = {
   phone: string;
   name: string;
   role: UserRole;
+  accountStatus: AccountStatus;
+  lawyerReviewStatus: LawyerReviewStatus;
+  rejectedReason?: string;
+  lawFirm?: string;
+  licenseNumber?: string;
+  practiceRegion?: string;
+  specialties: string[];
   createdAt: string;
+  updatedAt?: string;
 };
 
 export type AuthToken = {
@@ -138,6 +148,40 @@ export type OtpResponse = {
   phone: string;
   mockCode?: string;
   expiresAt: string;
+};
+
+export type ClientRegisterInput = {
+  phone: string;
+  code: string;
+  name: string;
+  acceptedTerms: boolean;
+  acceptedPrivacy: boolean;
+};
+
+export type LawyerOnboardingInput = ClientRegisterInput & {
+  lawFirm: string;
+  licenseNumber: string;
+  practiceRegion: string;
+  specialties: string[];
+};
+
+export type AdminUpdateUserInput = {
+  role?: UserRole;
+  accountStatus?: AccountStatus;
+};
+
+export type AdminReviewLawyerInput = {
+  status: 'approved' | 'rejected';
+  rejectedReason?: string;
+};
+
+export type AdminOverview = {
+  summary: {
+    totalUsers: number;
+    totalCases: number;
+    pendingLawyers: number;
+  };
+  recentCases: LawCase[];
 };
 
 export type CreateCaseInput = {

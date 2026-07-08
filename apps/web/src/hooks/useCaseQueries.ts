@@ -5,6 +5,9 @@ import {
   createLawyerDocument,
   createLawCase,
   evaluateCase,
+  getAdminLawyerApplications,
+  getAdminOverview,
+  getAdminUsers,
   getCase,
   getCaseDocuments,
   getCaseWorkItems,
@@ -16,14 +19,29 @@ import {
   getMessages,
   loginWithCode,
   markMessageRead,
+  onboardLawyer,
   requestLoginCode,
+  registerClient,
+  reviewAdminLawyer,
   selectCasePlan,
   submitLawyerDocument,
   submitLawyerReview,
+  updateAdminUser,
   updateLawyerDocument,
   uploadEvidence
 } from '../lib/api';
-import type { CreateDocumentInput, CreateCaseInput, LawCase, PlanId, SubmitReviewInput, UpdateDocumentInput } from '../lib/types';
+import type {
+  AdminReviewLawyerInput,
+  AdminUpdateUserInput,
+  ClientRegisterInput,
+  CreateDocumentInput,
+  CreateCaseInput,
+  LawCase,
+  LawyerOnboardingInput,
+  PlanId,
+  SubmitReviewInput,
+  UpdateDocumentInput
+} from '../lib/types';
 import { useAuthStore } from '../state/authStore';
 
 export const caseKeys = {
@@ -35,8 +53,15 @@ export const caseKeys = {
   documents: (caseId: string) => ['cases', caseId, 'documents'] as const,
   lawyerTasks: ['lawyer', 'tasks'] as const,
   lawyerTask: (taskId: string) => ['lawyer', 'tasks', taskId] as const,
-  lawyerDocuments: (caseId: string) => ['lawyer', 'cases', caseId, 'documents'] as const
+  lawyerDocuments: (caseId: string) => ['lawyer', 'cases', caseId, 'documents'] as const,
+  adminOverview: ['admin', 'overview'] as const,
+  adminUsers: ['admin', 'users'] as const,
+  adminLawyers: ['admin', 'lawyers'] as const
 };
+
+function isApprovedLawyer(user: ReturnType<typeof useAuthStore.getState>['user']) {
+  return user?.role === 'lawyer' && user.lawyerReviewStatus === 'approved';
+}
 
 export function useMeQuery() {
   const token = useAuthStore((state) => state.token);
@@ -98,7 +123,7 @@ export function useLawyerTasksQuery() {
   return useQuery({
     queryKey: caseKeys.lawyerTasks,
     queryFn: getLawyerTasks,
-    enabled: Boolean(token && user?.role === 'lawyer')
+    enabled: Boolean(token && isApprovedLawyer(user))
   });
 }
 
@@ -108,7 +133,7 @@ export function useLawyerTaskQuery(taskId: string) {
   return useQuery({
     queryKey: caseKeys.lawyerTask(taskId),
     queryFn: () => getLawyerTask(taskId),
-    enabled: Boolean(token && user?.role === 'lawyer' && taskId)
+    enabled: Boolean(token && isApprovedLawyer(user) && taskId)
   });
 }
 
@@ -118,7 +143,37 @@ export function useLawyerCaseDocumentsQuery(caseId: string) {
   return useQuery({
     queryKey: caseKeys.lawyerDocuments(caseId),
     queryFn: () => getLawyerCaseDocuments(caseId),
-    enabled: Boolean(token && user?.role === 'lawyer' && caseId)
+    enabled: Boolean(token && isApprovedLawyer(user) && caseId)
+  });
+}
+
+export function useAdminOverviewQuery() {
+  const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
+  return useQuery({
+    queryKey: caseKeys.adminOverview,
+    queryFn: getAdminOverview,
+    enabled: Boolean(token && user?.role === 'admin')
+  });
+}
+
+export function useAdminUsersQuery() {
+  const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
+  return useQuery({
+    queryKey: caseKeys.adminUsers,
+    queryFn: getAdminUsers,
+    enabled: Boolean(token && user?.role === 'admin')
+  });
+}
+
+export function useAdminLawyersQuery() {
+  const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
+  return useQuery({
+    queryKey: caseKeys.adminLawyers,
+    queryFn: getAdminLawyerApplications,
+    enabled: Boolean(token && user?.role === 'admin')
   });
 }
 
@@ -138,6 +193,56 @@ export function useLoginMutation() {
       queryClient.setQueryData(caseKeys.me, session.user);
       queryClient.removeQueries({ queryKey: caseKeys.lists });
       await queryClient.invalidateQueries({ queryKey: caseKeys.lists });
+    }
+  });
+}
+
+export function useRegisterClientMutation() {
+  const queryClient = useQueryClient();
+  const setSession = useAuthStore((state) => state.setSession);
+  return useMutation({
+    mutationFn: (input: ClientRegisterInput) => registerClient(input),
+    onSuccess: async (session) => {
+      setSession(session);
+      queryClient.setQueryData(caseKeys.me, session.user);
+      await queryClient.invalidateQueries({ queryKey: caseKeys.lists });
+    }
+  });
+}
+
+export function useOnboardLawyerMutation() {
+  const queryClient = useQueryClient();
+  const setSession = useAuthStore((state) => state.setSession);
+  return useMutation({
+    mutationFn: (input: LawyerOnboardingInput) => onboardLawyer(input),
+    onSuccess: (session) => {
+      setSession(session);
+      queryClient.setQueryData(caseKeys.me, session.user);
+    }
+  });
+}
+
+export function useUpdateAdminUserMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, input }: { userId: string; input: AdminUpdateUserInput }) => updateAdminUser(userId, input),
+    onSuccess: async (user) => {
+      queryClient.setQueryData(caseKeys.adminUsers, (users: unknown) =>
+        Array.isArray(users) ? users.map((item) => (typeof item === 'object' && item !== null && 'id' in item && item.id === user.id ? user : item)) : users
+      );
+      await queryClient.invalidateQueries({ queryKey: caseKeys.adminUsers });
+      await queryClient.invalidateQueries({ queryKey: caseKeys.adminLawyers });
+    }
+  });
+}
+
+export function useReviewAdminLawyerMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, input }: { userId: string; input: AdminReviewLawyerInput }) => reviewAdminLawyer(userId, input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: caseKeys.adminUsers });
+      await queryClient.invalidateQueries({ queryKey: caseKeys.adminLawyers });
     }
   });
 }

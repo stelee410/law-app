@@ -15,6 +15,9 @@ const testUser = {
   phone: '13800001234',
   name: '测试用户',
   role: 'client',
+  accountStatus: 'active',
+  lawyerReviewStatus: 'none',
+  specialties: [],
   createdAt: '2026-06-29T00:00:00.000Z'
 };
 
@@ -23,7 +26,61 @@ const testLawyer = {
   phone: '13900009999',
   name: '律师9999',
   role: 'lawyer',
+  accountStatus: 'active',
+  lawyerReviewStatus: 'approved',
+  lawFirm: '测试律师事务所',
+  licenseNumber: '11101202010123456',
+  practiceRegion: '上海',
+  specialties: ['合同纠纷'],
   createdAt: '2026-06-29T00:00:00.000Z'
+};
+
+const pendingLawyer = {
+  ...testLawyer,
+  id: 'lawyer-pending',
+  phone: '13900008888',
+  lawyerReviewStatus: 'pending_review'
+};
+
+const rejectedLawyer = {
+  ...testLawyer,
+  id: 'lawyer-rejected',
+  phone: '13900007777',
+  lawyerReviewStatus: 'rejected',
+  rejectedReason: '执业证号无法核验'
+};
+
+const testAdmin = {
+  id: 'admin-test',
+  phone: '13600000000',
+  name: '平台管理员',
+  role: 'admin',
+  accountStatus: 'active',
+  lawyerReviewStatus: 'none',
+  specialties: [],
+  createdAt: '2026-06-29T00:00:00.000Z'
+};
+
+const disabledUser = {
+  ...testUser,
+  id: 'user-disabled',
+  phone: '13800006666',
+  accountStatus: 'disabled'
+};
+
+const secondActiveUser = {
+  ...testUser,
+  id: 'user-second-active',
+  phone: '13800005555',
+  name: '第二位用户'
+};
+
+const secondDisabledUser = {
+  ...testUser,
+  id: 'user-second-disabled',
+  phone: '13800004444',
+  name: '第二位禁用用户',
+  accountStatus: 'disabled'
 };
 
 const testCase = {
@@ -198,6 +255,15 @@ beforeEach(() => {
     vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       const method = input instanceof Request ? input.method : init?.method;
+      if (url.endsWith('/api/v1/auth/request-code')) {
+        return Promise.resolve(jsonResponse({ phone: '13800001234', mockCode: '654321', expiresAt: '2026-07-30T00:00:00.000Z' }));
+      }
+      if (url.endsWith('/api/v1/auth/register/client')) {
+        return Promise.resolve(jsonResponse({ token: 'client-token', user: testUser, expiresAt: '2026-07-30T00:00:00.000Z' }));
+      }
+      if (url.endsWith('/api/v1/auth/onboard-lawyer')) {
+        return Promise.resolve(jsonResponse({ token: 'lawyer-pending-token', user: pendingLawyer, expiresAt: '2026-07-30T00:00:00.000Z' }));
+      }
       if (url.endsWith('/api/v1/cases') && method === 'POST') {
         createdCasePayload = input instanceof Request ? await input.clone().json() : JSON.parse(String(init?.body));
         return jsonResponse({ case: { ...testCase, ...(createdCasePayload as object), id: 'case-created' } });
@@ -207,6 +273,15 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/v1/messages')) {
         return Promise.resolve(jsonResponse({ messages: [testMessage] }));
+      }
+      if (url.endsWith('/api/v1/admin/users')) {
+        return Promise.resolve(jsonResponse({ users: [testAdmin, testUser, secondActiveUser, disabledUser, secondDisabledUser] }));
+      }
+      if (url.endsWith('/api/v1/admin/lawyers')) {
+        return Promise.resolve(jsonResponse({ lawyers: [pendingLawyer, rejectedLawyer] }));
+      }
+      if (url.endsWith('/api/v1/admin/overview')) {
+        return Promise.resolve(jsonResponse({ summary: { totalUsers: 4, totalCases: 1, pendingLawyers: 1 }, recentCases: [testCase] }));
       }
       if (url.endsWith('/api/v1/cases/case-test/work-items')) {
         return Promise.resolve(jsonResponse({ workItems: [lawyerTask] }));
@@ -228,6 +303,9 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/v1/cases/case-test')) {
         return Promise.resolve(jsonResponse({ case: assessedCase }));
+      }
+      if (url.endsWith('/api/v1/cases/case-created')) {
+        return Promise.resolve(jsonResponse({ case: { ...testCase, id: 'case-created' } }));
       }
       return Promise.resolve(jsonResponse({}));
     })
@@ -359,6 +437,132 @@ describe('App', () => {
 
     await waitFor(() => expect(window.location.pathname).toBe('/login'));
     expect(await screen.findByText('手机号验证码登录')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '客户注册' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '律师入驻' })).toBeInTheDocument();
+    expect(screen.queryByText('客户演示')).not.toBeInTheDocument();
+    expect(screen.queryByText('律师演示')).not.toBeInTheDocument();
+  });
+
+  it('keeps client registration consent unchecked and required', async () => {
+    const user = userEvent.setup();
+    await router.navigate({ to: '/register/client' });
+
+    render(<App />);
+
+    expect(await screen.findByText('客户注册')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('姓名'), '王先生');
+    await user.type(screen.getByLabelText('手机号'), '13800001234');
+    await user.type(screen.getByLabelText('验证码'), '654321');
+
+    const terms = screen.getByLabelText(/服务协议/);
+    const privacy = screen.getByLabelText(/隐私政策/);
+    const submit = screen.getByRole('button', { name: '完成注册' });
+    expect(terms).not.toBeChecked();
+    expect(privacy).not.toBeChecked();
+    expect(submit).toBeDisabled();
+
+    await user.click(terms);
+    expect(submit).toBeDisabled();
+    await user.click(privacy);
+    expect(submit).toBeEnabled();
+  });
+
+  it('submits lawyer onboarding and routes pending lawyers to review status', async () => {
+    const user = userEvent.setup();
+    await router.navigate({ to: '/register/lawyer' });
+
+    render(<App />);
+
+    expect(await screen.findByText('律师入驻')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('姓名'), '赵律师');
+    await user.type(screen.getByLabelText('手机号'), '13900008888');
+    await user.type(screen.getByLabelText('验证码'), '654321');
+    await user.type(screen.getByLabelText('律所'), '测试律师事务所');
+    await user.type(screen.getByLabelText('执业证号'), '11101202010123456');
+    await user.type(screen.getByLabelText('执业地区'), '上海');
+    await user.type(screen.getByLabelText('擅长领域'), '合同纠纷,债务催收');
+    await user.click(screen.getByLabelText(/服务协议/));
+    await user.click(screen.getByLabelText(/隐私政策/));
+    await user.click(screen.getByRole('button', { name: '提交入驻申请' }));
+
+    await waitFor(() => expect(window.location.pathname).toBe('/lawyer/review-status'));
+    expect(await screen.findByText('入驻审核中')).toBeInTheDocument();
+  });
+
+  it('shows rejected lawyer review reason', async () => {
+    useAuthStore.getState().setSession({
+      token: 'lawyer-rejected-token',
+      user: rejectedLawyer,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, rejectedLawyer);
+    await router.navigate({ to: '/lawyer/review-status' });
+
+    render(<App />);
+
+    expect(await screen.findByText('入驻未通过')).toBeInTheDocument();
+    expect(await screen.findByText('执业证号无法核验')).toBeInTheDocument();
+  });
+
+  it('renders admin navigation and user management actions', async () => {
+    useAuthStore.getState().setSession({
+      token: 'admin-token',
+      user: testAdmin,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testAdmin);
+    queryClient.setQueryData(caseKeys.adminUsers, [testAdmin, testUser, secondActiveUser, disabledUser, secondDisabledUser]);
+    await router.navigate({ to: '/admin/users' });
+
+    render(<App />);
+
+    expect(await screen.findByText('用户管理')).toBeInTheDocument();
+    expect(await screen.findByText('平台管理员')).toBeInTheDocument();
+    expect(await screen.findByText('第二位用户')).toBeInTheDocument();
+    expect(await screen.findByText('第二位禁用用户')).toBeInTheDocument();
+    expect(await screen.findAllByRole('button', { name: '调整角色' })).toHaveLength(2);
+    expect(await screen.findAllByRole('button', { name: '禁用账号' })).toHaveLength(2);
+    expect(await screen.findAllByRole('button', { name: '恢复账号' })).toHaveLength(2);
+    expect(await screen.findByText('管理')).toBeInTheDocument();
+    expect(await screen.findByText('用户')).toBeInTheDocument();
+    expect(await screen.findByText('律师')).toBeInTheDocument();
+  });
+
+  it('renders built-in legal document pages', async () => {
+    await router.navigate({ to: '/legal/terms' });
+    render(<App />);
+
+    expect(await screen.findByText('服务协议')).toBeInTheDocument();
+    await router.navigate({ to: '/legal/privacy' });
+    expect(await screen.findByText('隐私政策')).toBeInTheDocument();
+    await router.navigate({ to: '/legal/case-authorization' });
+    expect(await screen.findByText('案件资料授权书')).toBeInTheDocument();
+  });
+
+  it('clears local session when backend reports a disabled account', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith('/api/v1/me')) {
+          return jsonResponse({ detail: 'ACCOUNT_DISABLED' }, 403);
+        }
+        if (url.endsWith('/api/v1/cases')) {
+          return jsonResponse({ cases: [] });
+        }
+        return jsonResponse({});
+      })
+    );
+    useAuthStore.getState().setSession({
+      token: 'disabled-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(useAuthStore.getState().token).toBeNull());
+    await waitFor(() => expect(window.location.pathname).toBe('/login'));
   });
 
   it('renders assessment result and plan entry', async () => {
@@ -490,7 +694,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: /\.pdf$/ }));
+    await user.click(await screen.findByRole('button', { name: '合同.pdf' }));
 
     await waitFor(() =>
       expect(getSpy).toHaveBeenCalledWith('/api/v1/lawyer/cases/case-test/evidence/contract/files/file-contract')
@@ -539,9 +743,9 @@ describe('App', () => {
   });
 });
 
-function jsonResponse(body: unknown) {
+function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: {
       'Content-Type': 'application/json'
     }

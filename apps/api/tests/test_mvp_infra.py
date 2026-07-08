@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from app.core.config import Settings
 from app.evidence import service as evidence_service
 from app.evidence.service import upload_evidence
-from app.schemas import AssessmentResult, CaseType, CreateCaseInput
+from app.schemas import AssessmentResult, CaseType, ClientRegisterInput, CreateCaseInput
 from app.store import InMemoryStore
 from app.workflows.case_assessment import assess_case
 
@@ -26,7 +26,15 @@ def _memory_settings(**overrides):
 
 def _create_demo_case(store: InMemoryStore):
   otp = store.request_login_code("13800001234")
-  session = store.login_with_code("13800001234", otp["code"])
+  session = store.register_client(
+    ClientRegisterInput(
+      phone="13800001234",
+      code=otp["code"],
+      name="演示用户",
+      acceptedTerms=True,
+      acceptedPrivacy=True,
+    )
+  )
   assert session is not None
   law_case = store.create_case(
     session.user.id,

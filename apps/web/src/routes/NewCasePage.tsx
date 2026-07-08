@@ -1,4 +1,4 @@
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, ArrowRight, Check, HelpCircle, ShieldCheck } from 'lucide-react';
 import { FormEvent, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -125,7 +125,12 @@ export function NewCasePage() {
               setForm({ ...form, privacyConsent: event.target.checked });
             }}
           />
-          <span>{catalog.privacyCopy}</span>
+          <span>
+            {catalog.privacyCopy}
+            <Link className="ml-1 font-black text-blue-700" to="/legal/case-authorization" onClick={(event) => event.stopPropagation()}>
+              案件资料授权书
+            </Link>
+          </span>
         </label>
       )}
       <p className="flex gap-2 rounded-lg bg-[#f5f4ed] p-3 text-sm font-semibold leading-6 text-[#8a4b36]">

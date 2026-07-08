@@ -1,18 +1,22 @@
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
+import { AdminDashboardPage, AdminLawyersPage, AdminUsersPage } from './routes/AdminPages';
 import { AssessmentPage } from './routes/AssessmentPage';
 import { CaseDetailPage } from './routes/CaseDetailPage';
 import { CasesPage } from './routes/CasesPage';
 import { EvidencePage } from './routes/EvidencePage';
 import { HomePage } from './routes/HomePage';
+import { CaseAuthorizationPage, PrivacyPage, TermsPage } from './routes/LegalDocumentPages';
 import { LoginPage } from './routes/LoginPage';
 import { LawyerDashboardPage } from './routes/LawyerDashboardPage';
 import { LawyerDocumentEditorPage } from './routes/LawyerDocumentEditorPage';
+import { LawyerReviewStatusPage } from './routes/LawyerReviewStatusPage';
 import { LawyerTaskPage } from './routes/LawyerTaskPage';
 import { MessagesPage } from './routes/MessagesPage';
 import { NewCasePage } from './routes/NewCasePage';
 import { NotFoundPage } from './routes/NotFoundPage';
 import { PlanPage } from './routes/PlanPage';
 import { ProfilePage } from './routes/ProfilePage';
+import { ClientRegistrationPage, LawyerOnboardingPage } from './routes/RegistrationPages';
 import { RootLayout } from './routes/RootLayout';
 
 const rootRoute = createRootRoute({
@@ -29,6 +33,18 @@ const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'login',
   component: LoginPage
+});
+
+const clientRegistrationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'register/client',
+  component: ClientRegistrationPage
+});
+
+const lawyerOnboardingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'register/lawyer',
+  component: LawyerOnboardingPage
 });
 
 const newCaseRoute = createRoute({
@@ -85,6 +101,12 @@ const lawyerDashboardRoute = createRoute({
   component: LawyerDashboardPage
 });
 
+const lawyerReviewStatusRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'lawyer/review-status',
+  component: LawyerReviewStatusPage
+});
+
 const lawyerTaskRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'lawyer/tasks/$taskId',
@@ -97,9 +119,47 @@ const lawyerDocumentRoute = createRoute({
   component: LawyerDocumentEditorPage
 });
 
+const adminDashboardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'admin',
+  component: AdminDashboardPage
+});
+
+const adminUsersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'admin/users',
+  component: AdminUsersPage
+});
+
+const adminLawyersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'admin/lawyers',
+  component: AdminLawyersPage
+});
+
+const termsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'legal/terms',
+  component: TermsPage
+});
+
+const privacyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'legal/privacy',
+  component: PrivacyPage
+});
+
+const caseAuthorizationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'legal/case-authorization',
+  component: CaseAuthorizationPage
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
+  clientRegistrationRoute,
+  lawyerOnboardingRoute,
   newCaseRoute,
   casesRoute,
   caseDetailRoute,
@@ -107,8 +167,15 @@ const routeTree = rootRoute.addChildren([
   assessmentRoute,
   planRoute,
   lawyerDashboardRoute,
+  lawyerReviewStatusRoute,
   lawyerTaskRoute,
   lawyerDocumentRoute,
+  adminDashboardRoute,
+  adminUsersRoute,
+  adminLawyersRoute,
+  termsRoute,
+  privacyRoute,
+  caseAuthorizationRoute,
   messagesRoute,
   profileRoute
 ]);

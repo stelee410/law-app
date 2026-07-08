@@ -7,7 +7,9 @@ EvidenceStatus = Literal["pending", "uploaded", "recognized", "optional"]
 DueStatus = Literal["已到期", "部分到期", "不确定"]
 CaseType = Literal["debt_collection", "lawyer_letter", "labor_dispute", "rental_dispute", "contract_review"]
 PlanId = Literal["self-service", "lawyer-review", "full-service"]
-UserRole = Literal["client", "lawyer"]
+UserRole = Literal["client", "lawyer", "admin"]
+AccountStatus = Literal["active", "disabled"]
+LawyerReviewStatus = Literal["none", "pending_review", "approved", "rejected"]
 WorkItemKind = Literal["ai_guidance", "lawyer_review", "document_draft", "document_revision"]
 WorkItemStatus = Literal["pending", "in_progress", "completed", "cancelled"]
 RiskLevel = Literal["low", "medium", "high"]
@@ -53,6 +55,12 @@ ErrorCode = Literal[
   "WORKFLOW_FAILED",
   "LLM_UNAVAILABLE",
   "INTERNAL_ERROR",
+  "USER_NOT_FOUND",
+  "ACCOUNT_DISABLED",
+  "LAWYER_NOT_APPROVED",
+  "LAWYER_REJECTED",
+  "FORBIDDEN",
+  "LAST_ADMIN_REQUIRED",
 ]
 
 
@@ -140,7 +148,15 @@ class User(ApiModel):
   phone: str
   name: str
   role: UserRole = "client"
+  accountStatus: AccountStatus = "active"
+  lawyerReviewStatus: LawyerReviewStatus = "none"
+  rejectedReason: str | None = None
+  lawFirm: str | None = None
+  licenseNumber: str | None = None
+  practiceRegion: str | None = None
+  specialties: list[str] = Field(default_factory=list)
   createdAt: str
+  updatedAt: str | None = None
 
 
 class AuthToken(ApiModel):
@@ -229,6 +245,60 @@ class RequestCodeInput(ApiModel):
 
 class LoginInput(RequestCodeInput):
   code: str = Field(min_length=4)
+
+
+class ClientRegisterInput(LoginInput):
+  name: str = Field(min_length=1)
+  acceptedTerms: bool
+  acceptedPrivacy: bool
+
+  @field_validator("acceptedTerms")
+  @classmethod
+  def require_terms(cls, value: bool) -> bool:
+    if value is not True:
+      raise ValueError("TERMS_REQUIRED")
+    return value
+
+  @field_validator("acceptedPrivacy")
+  @classmethod
+  def require_privacy(cls, value: bool) -> bool:
+    if value is not True:
+      raise ValueError("PRIVACY_REQUIRED")
+    return value
+
+
+class LawyerOnboardingInput(ClientRegisterInput):
+  lawFirm: str = Field(min_length=1)
+  licenseNumber: str = Field(min_length=1)
+  practiceRegion: str = Field(min_length=1)
+  specialties: list[str] = Field(min_length=1)
+
+
+class AdminUpdateUserInput(ApiModel):
+  role: UserRole | None = None
+  accountStatus: AccountStatus | None = None
+
+
+class AdminReviewLawyerInput(ApiModel):
+  status: Literal["approved", "rejected"]
+  rejectedReason: str | None = None
+
+  @field_validator("rejectedReason")
+  @classmethod
+  def normalize_rejected_reason(cls, value: str | None) -> str | None:
+    if value is None:
+      return None
+    normalized = value.strip()
+    return normalized or None
+
+  @field_validator("status")
+  @classmethod
+  def require_supported_review_status(cls, value: str) -> str:
+    return value
+
+  def model_post_init(self, __context: Any) -> None:
+    if self.status == "rejected" and not self.rejectedReason:
+      raise ValueError("REJECTED_REASON_REQUIRED")
 
 
 class CreateCaseInput(ApiModel):

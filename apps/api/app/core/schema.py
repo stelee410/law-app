@@ -9,7 +9,15 @@ def initialize_schema(database: Database) -> None:
       phone TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'client',
-      created_at TEXT NOT NULL
+      account_status TEXT NOT NULL DEFAULT 'active',
+      lawyer_review_status TEXT NOT NULL DEFAULT 'none',
+      rejected_reason TEXT,
+      law_firm TEXT,
+      license_number TEXT,
+      practice_region TEXT,
+      specialties_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TEXT NOT NULL,
+      updated_at TEXT
     )
     """,
     """
@@ -149,6 +157,18 @@ def initialize_schema(database: Database) -> None:
     )
     """,
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'client'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'active'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS lawyer_review_status TEXT NOT NULL DEFAULT 'none'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS rejected_reason TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS law_firm TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS license_number TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS practice_region TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS specialties_json JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TEXT",
+    "UPDATE users SET account_status = 'active' WHERE account_status IS NULL",
+    "UPDATE users SET lawyer_review_status = 'approved' WHERE role = 'lawyer' AND lawyer_review_status = 'none'",
+    "UPDATE users SET lawyer_review_status = 'none' WHERE role <> 'lawyer' AND lawyer_review_status IS NULL",
+    "UPDATE users SET updated_at = created_at WHERE updated_at IS NULL",
     "ALTER TABLE cases ADD COLUMN IF NOT EXISTS case_type TEXT NOT NULL DEFAULT 'debt_collection'",
     "ALTER TABLE cases ADD COLUMN IF NOT EXISTS party_role TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE cases ADD COLUMN IF NOT EXISTS counterparty_name TEXT NOT NULL DEFAULT ''",

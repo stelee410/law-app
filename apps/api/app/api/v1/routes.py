@@ -11,8 +11,12 @@ from app.evidence import service as evidence_service
 from app.evidence.service import EvidenceUploadError
 from app.events import service as events_service
 from app.schemas import (
+  AdminReviewLawyerInput,
+  AdminUpdateUserInput,
+  ClientRegisterInput,
   CreateCaseInput,
   CreateDocumentInput,
+  LawyerOnboardingInput,
   LoginInput,
   RequestCodeInput,
   SelectPlanInput,
@@ -20,7 +24,14 @@ from app.schemas import (
   UpdateDocumentInput,
   User,
 )
-from app.store import AppStore, InvalidStateError
+from app.store import (
+  AccountDisabledError,
+  AppStore,
+  InvalidStateError,
+  LastAdminRequiredError,
+  RoleChangeForbiddenError,
+  UserNotFoundError,
+)
 from app.workflows import service as assessment_service
 
 router = APIRouter()
@@ -44,11 +55,23 @@ def _get_current_user(
   user = auth_service.get_current_user(store, token)
   if user is None:
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="AUTH_REQUIRED")
+  if user.accountStatus == "disabled":
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_DISABLED")
   return user
 
 
 def _get_current_lawyer(current_user: Annotated[User, Depends(_get_current_user)]) -> User:
   if current_user.role != "lawyer":
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="FORBIDDEN")
+  if current_user.lawyerReviewStatus == "rejected":
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="LAWYER_REJECTED")
+  if current_user.lawyerReviewStatus != "approved":
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="LAWYER_NOT_APPROVED")
+  return current_user
+
+
+def _get_current_admin(current_user: Annotated[User, Depends(_get_current_user)]) -> User:
+  if current_user.role != "admin":
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="FORBIDDEN")
   return current_user
 
@@ -77,7 +100,42 @@ def login(
   payload: LoginInput,
   store: Annotated[AppStore, Depends(_get_store)],
 ):
-  session = auth_service.login_with_code(store, payload.phone, payload.code)
+  try:
+    session = auth_service.login_with_code(store, payload.phone, payload.code)
+  except UserNotFoundError as exc:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="USER_NOT_FOUND") from exc
+  except AccountDisabledError as exc:
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_DISABLED") from exc
+  if session is None:
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="INVALID_CODE")
+  return session
+
+
+@router.post("/auth/register/client")
+def register_client(
+  payload: ClientRegisterInput,
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    session = store.register_client(payload)
+  except AccountDisabledError as exc:
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_DISABLED") from exc
+  if session is None:
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="INVALID_CODE")
+  return session
+
+
+@router.post("/auth/onboard-lawyer")
+def onboard_lawyer(
+  payload: LawyerOnboardingInput,
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    session = store.onboard_lawyer(payload)
+  except AccountDisabledError as exc:
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_DISABLED") from exc
+  except RoleChangeForbiddenError as exc:
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="FORBIDDEN") from exc
   if session is None:
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="INVALID_CODE")
   return session
@@ -86,6 +144,72 @@ def login(
 @router.get("/me")
 def me(current_user: Annotated[User, Depends(_get_current_user)]):
   return {"user": current_user}
+
+
+@router.get("/admin/users")
+def admin_users(
+  current_admin: Annotated[User, Depends(_get_current_admin)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  return {"users": store.list_admin_users()}
+
+
+@router.patch("/admin/users/{user_id}")
+def admin_update_user(
+  user_id: str,
+  payload: AdminUpdateUserInput,
+  current_admin: Annotated[User, Depends(_get_current_admin)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    user = store.update_user_admin(user_id, payload)
+  except LastAdminRequiredError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="LAST_ADMIN_REQUIRED") from exc
+  if user is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="USER_NOT_FOUND")
+  return {"user": user}
+
+
+@router.get("/admin/lawyers")
+def admin_lawyer_applications(
+  current_admin: Annotated[User, Depends(_get_current_admin)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  return {"lawyers": store.list_lawyer_applications()}
+
+
+@router.post("/admin/lawyers/{user_id}/review")
+def admin_review_lawyer(
+  user_id: str,
+  payload: AdminReviewLawyerInput,
+  current_admin: Annotated[User, Depends(_get_current_admin)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  user = store.review_lawyer_application(user_id, payload)
+  if user is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="USER_NOT_FOUND")
+  return {"user": user}
+
+
+@router.get("/admin/overview")
+def admin_overview(
+  current_admin: Annotated[User, Depends(_get_current_admin)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  users = store.list_admin_users()
+  cases = store.list_admin_cases()
+  pending_lawyers = [
+    user for user in users
+    if user.role == "lawyer" and user.lawyerReviewStatus == "pending_review"
+  ]
+  return {
+    "summary": {
+      "totalUsers": len(users),
+      "totalCases": len(cases),
+      "pendingLawyers": len(pending_lawyers),
+    },
+    "recentCases": cases[:20],
+  }
 
 
 @router.get("/messages")
@@ -336,6 +460,7 @@ def lawyer_evidence_file(
     filename=evidence_file.name,
     content_disposition_type=disposition,
   )
+
 
 @router.patch("/lawyer/cases/{case_id}/documents/{document_id}")
 def update_lawyer_document(

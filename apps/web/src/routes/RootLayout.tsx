@@ -16,6 +16,10 @@ export function RootLayout() {
   const logout = useAuthStore((state) => state.logout);
   const meQuery = useMeQuery();
   const isLogin = location.pathname === '/login';
+  const isRegister = location.pathname.startsWith('/register/');
+  const isLegal = location.pathname.startsWith('/legal/');
+  const isPublic = isLogin || isRegister || isLegal;
+  const isLawyerPending = user?.role === 'lawyer' && user.lawyerReviewStatus !== 'approved';
 
   useEffect(() => {
     if (meQuery.data) setUser(meQuery.data);
@@ -26,19 +30,26 @@ export function RootLayout() {
   }, [logout, meQuery.isError]);
 
   useEffect(() => {
-    if (!token && !isLogin) {
+    if (!token && !isPublic) {
       void navigate({ to: '/login', replace: true });
     }
-    if (token && isLogin) {
-      void navigate({ to: user?.role === 'lawyer' ? '/lawyer' : '/', replace: true });
+    if (token && (isLogin || isRegister)) {
+      const target = user?.role === 'admin' ? '/admin' : user?.role === 'lawyer' ? (isLawyerPending ? '/lawyer/review-status' : '/lawyer') : '/';
+      void navigate({ to: target, replace: true });
     }
-    if (token && user?.role === 'lawyer' && location.pathname === '/') {
+    if (token && user?.role === 'admin' && location.pathname === '/') {
+      void navigate({ to: '/admin', replace: true });
+    }
+    if (token && user?.role === 'lawyer' && isLawyerPending && location.pathname !== '/lawyer/review-status' && !isLegal) {
+      void navigate({ to: '/lawyer/review-status', replace: true });
+    }
+    if (token && user?.role === 'lawyer' && !isLawyerPending && location.pathname === '/') {
       void navigate({ to: '/lawyer', replace: true });
     }
-  }, [isLogin, location.pathname, navigate, token, user?.role]);
+  }, [isLegal, isLogin, isPublic, isRegister, isLawyerPending, location.pathname, navigate, token, user?.role]);
 
-  const showNav = Boolean(token && !isLogin);
-  const needsAuthRedirect = !token && !isLogin;
+  const showNav = Boolean(token && !isLogin && !isRegister);
+  const needsAuthRedirect = !token && !isPublic;
   const isRestoring = Boolean(token && !user && meQuery.isPending);
 
   return (

@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { BriefcaseBusiness, ClipboardList, Home, MessageCircle, Plus, UserRound } from 'lucide-react';
+import { BriefcaseBusiness, ClipboardList, Home, MessageCircle, Plus, ShieldCheck, UsersRound, UserRound } from 'lucide-react';
 import type { UserRole } from '../../lib/types';
 
 export function BottomNav({ pathname, role = 'client' }: { pathname: string; role?: UserRole }) {
@@ -20,10 +20,17 @@ export function BottomNav({ pathname, role = 'client' }: { pathname: string; rol
     { to: '/messages', label: '消息', icon: MessageCircle, active: pathname === '/messages' },
     { to: '/me', label: '我的', icon: UserRound, active: pathname === '/me' }
   ] as const;
-  const items = role === 'lawyer' ? lawyerItems : clientItems;
+  const adminItems = [
+    { to: '/admin', label: '管理', icon: ShieldCheck, active: pathname === '/admin' },
+    { to: '/admin/users', label: '用户', icon: UsersRound, active: pathname === '/admin/users' },
+    { to: '/admin/lawyers', label: '律师', icon: ClipboardList, active: pathname === '/admin/lawyers' },
+    { to: '/me', label: '我的', icon: UserRound, active: pathname === '/me' }
+  ] as const;
+  const items = role === 'admin' ? adminItems : role === 'lawyer' ? lawyerItems : clientItems;
+  const columnClass = role === 'admin' ? 'grid-cols-4' : role === 'lawyer' ? 'grid-cols-3' : 'grid-cols-5';
 
   return (
-    <nav className={`absolute inset-x-0 bottom-0 grid border-t border-slate-200 bg-white/95 px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur ${role === 'lawyer' ? 'grid-cols-3' : 'grid-cols-5'}`}>
+    <nav className={`absolute inset-x-0 bottom-0 grid border-t border-slate-200 bg-white/95 px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur ${columnClass}`}>
       {items.map((item) => {
         const Icon = item.icon;
         return (
