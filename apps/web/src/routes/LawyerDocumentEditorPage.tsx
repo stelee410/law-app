@@ -42,6 +42,7 @@ export function LawyerDocumentEditorPage() {
   const [request, setRequest] = useState('');
   const [deadline, setDeadline] = useState('');
   const [body, setBody] = useState('请贵司收到本函后及时履行付款或处理义务。');
+  const [fieldError, setFieldError] = useState('');
   const isDraft = isNew || document?.status === 'draft';
   const readOnly = !isDraft;
 
@@ -53,12 +54,29 @@ export function LawyerDocumentEditorPage() {
     setRequest(String(document.fields.request ?? ''));
     setDeadline(String(document.fields.deadline ?? ''));
     setBody(document.body);
+    setFieldError('');
   }, [document]);
+
+  function requiredFieldError() {
+    const missingFields = [
+      !recipient.trim() ? '收件人 / 对方当事人' : '',
+      !request.trim() ? '请求事项 / 审查目标' : '',
+      !deadline.trim() ? '履行期限 / 交付期限' : ''
+    ].filter(Boolean);
+    return missingFields.length ? `请先填写${missingFields.join('、')}。` : '';
+  }
+
+  function validateRequiredFields() {
+    const nextError = requiredFieldError();
+    setFieldError(nextError);
+    return !nextError;
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (readOnly) return;
-    const fields = { recipient, request, deadline };
+    if (!validateRequiredFields()) return;
+    const fields = { recipient: recipient.trim(), request: request.trim(), deadline: deadline.trim() };
     if (isNew) {
       const created = await createDocument.mutateAsync({ type, title, fields, body });
       await navigate({ to: '/lawyer/cases/$caseId/documents/$documentId', params: { caseId, documentId: created.id } });
@@ -69,6 +87,7 @@ export function LawyerDocumentEditorPage() {
 
   async function handleSend() {
     if (isNew) return;
+    if (!validateRequiredFields()) return;
     await submitDocument.mutateAsync(documentId);
   }
 
@@ -100,6 +119,11 @@ export function LawyerDocumentEditorPage() {
         {readOnly && (
           <div className="rounded-lg bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-600">
             当前文书已进入确认或归档状态，仅可查看，不可继续编辑。
+          </div>
+        )}
+        {fieldError && (
+          <div className="rounded-lg bg-amber-50 p-3 text-sm font-semibold leading-6 text-amber-800">
+            {fieldError}
           </div>
         )}
         <label className="block">

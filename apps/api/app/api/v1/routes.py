@@ -340,7 +340,10 @@ def evaluate_case(
   current_user: Annotated[User, Depends(_get_current_user)],
   store: Annotated[AppStore, Depends(_get_store)],
 ):
-  job = assessment_service.start_case_assessment(store, current_user.id, case_id)
+  try:
+    job = assessment_service.start_case_assessment(store, current_user.id, case_id)
+  except InvalidStateError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
   law_case = cases_service.get_case(store, current_user.id, case_id)
   if job is None or law_case is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")

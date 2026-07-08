@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from secrets import token_urlsafe
@@ -12,6 +13,12 @@ from app.cases.catalog import (
   create_evidence_categories as create_catalog_evidence_categories,
   get_case_type_label,
   normalize_case_type,
+)
+from app.cases.self_service import (
+  SelfServicePayload,
+  apply_self_service_outcome,
+  build_self_service_payload,
+  ensure_ai_notice,
 )
 from app.core.config import Settings
 from app.core.database import Database
@@ -41,6 +48,25 @@ from app.schemas import (
   WorkItem,
 )
 from app.workflows.case_assessment import SERVICE_PLANS, assess_case
+from app.workflows.llm import generate_self_service_document_body
+
+logger = logging.getLogger("uvicorn.error")
+
+
+def _build_enhanced_self_service_payload(settings: Settings, law_case: LawCase) -> SelfServicePayload:
+  payload = build_self_service_payload(law_case)
+  try:
+    enhanced = generate_self_service_document_body(settings, law_case, payload.body)
+  except Exception as exc:
+    logger.info(
+      "self_service.llm call_failed case_id=%s reason=unexpected_%s",
+      law_case.id,
+      exc.__class__.__name__,
+    )
+    enhanced = None
+  if enhanced is not None:
+    payload.body = ensure_ai_notice(enhanced)
+  return payload
 
 
 class InvalidStateError(Exception):
@@ -395,6 +421,7 @@ class InMemoryStore:
     law_case = self.get_case(user_id, case_id)
     if law_case is None:
       return None
+    _require_required_evidence(law_case)
     return self._run_assessment(law_case)
 
   def select_plan(self, user_id: str, case_id: str, plan_id: PlanId) -> LawCase | None:
@@ -403,12 +430,14 @@ class InMemoryStore:
       return None
     if not any(plan.id == plan_id for plan in law_case.assessment.plans):
       return None
+    _require_required_evidence(law_case)
     if law_case.selectedPlan == plan_id:
       return law_case
     if law_case.selectedPlan is not None:
       raise InvalidStateError("INVALID_STATE")
 
     _apply_selected_plan(law_case, plan_id)
+    self_service_payload = _build_enhanced_self_service_payload(self.settings, law_case) if plan_id == "self-service" else None
     selected_plan = next(plan for plan in law_case.assessment.plans if plan.id == plan_id)
     self._record_event(
       law_case.id,
@@ -417,7 +446,7 @@ class InMemoryStore:
       f"已选择：{selected_plan.name}",
       {"planId": plan_id},
     )
-    self._create_plan_follow_up(law_case, user_id, plan_id)
+    self._create_plan_follow_up(law_case, user_id, plan_id, self_service_payload)
     return law_case
 
   def list_messages(self, user_id: str) -> list[NotificationMessage]:
@@ -473,7 +502,7 @@ class InMemoryStore:
       law_case.userId or "",
       "document",
       "文书已确认",
-      f"已确认文书 {document.id}：{document.title}，案件将进入下一阶段。",
+      f"已确认《{document.title}》，平台将同步律师跟进后续处理。",
       f"/cases/{case_id}",
       case_id,
     )
@@ -653,6 +682,7 @@ class InMemoryStore:
       return None
     if document.status != "draft":
       raise InvalidStateError("INVALID_STATE")
+    _require_document_submission_fields(document)
     document.status = "pending_client_approval"
     document.updatedBy = lawyer_id
     document.updatedAt = _iso(_now())
@@ -773,16 +803,51 @@ class InMemoryStore:
     event = _new_event(case_id, event_type, title, message, payload)
     self._events.setdefault(case_id, []).append(event)
 
-  def _create_plan_follow_up(self, law_case: LawCase, user_id: str, plan_id: PlanId) -> None:
+  def _create_plan_follow_up(
+    self,
+    law_case: LawCase,
+    user_id: str,
+    plan_id: PlanId,
+    self_service_payload: SelfServicePayload | None = None,
+  ) -> None:
     if plan_id == "self-service":
-      summary = _ai_guidance_summary(law_case)
-      task = _new_work_item(law_case.id, "ai_guidance", "AI自助任务", summary)
+      payload = self_service_payload or build_self_service_payload(law_case)
+      task = _new_work_item(law_case.id, "ai_guidance", "AI自助任务", payload.taskSummary)
+      task.status = "completed"
+      task.updatedAt = _iso(_now())
       self._work_items[task.id] = task
+      document = _new_document(
+        law_case.id,
+        user_id,
+        CreateDocumentInput(
+          type=payload.documentType,
+          title=payload.title,
+          fields=payload.fields,
+          body=payload.body,
+        ),
+      )
+      document.status = "approved"
+      self._documents[document.id] = document
+      apply_self_service_outcome(law_case, payload, _format_datetime(_now()))
+      self._record_event(
+        law_case.id,
+        "document.updated",
+        "AI自助文书已生成",
+        payload.title,
+        {"documentId": document.id, "documentType": document.type, "source": "ai_self_service"},
+      )
+      self._record_event(
+        law_case.id,
+        "task.updated",
+        "AI自助任务已完成",
+        payload.taskSummary,
+        {"workItemId": task.id},
+      )
       self._create_message(
         user_id,
-        "task",
-        "AI自助流程已启动",
-        summary,
+        "document",
+        payload.messageTitle,
+        payload.messageBody,
         f"/cases/{law_case.id}",
         law_case.id,
       )
@@ -1198,6 +1263,7 @@ class PostgresStore:
     law_case = self.get_case(user_id, case_id)
     if law_case is None:
       return None
+    _require_required_evidence(law_case)
     created_at = _now()
     job_id = f"job-{uuid4().hex[:8]}"
     started_event = _new_event(
@@ -1257,11 +1323,13 @@ class PostgresStore:
       return None
     if not any(plan.id == plan_id for plan in law_case.assessment.plans):
       return None
+    _require_required_evidence(law_case)
     if law_case.selectedPlan == plan_id:
       return law_case
     if law_case.selectedPlan is not None:
       raise InvalidStateError("INVALID_STATE")
     _apply_selected_plan(law_case, plan_id)
+    self_service_payload = _build_enhanced_self_service_payload(self.settings, law_case) if plan_id == "self-service" else None
     selected_plan = next(plan for plan in law_case.assessment.plans if plan.id == plan_id)
     with self.database.connection() as conn:
       with conn.cursor(row_factory=dict_row) as cursor:
@@ -1276,7 +1344,7 @@ class PostgresStore:
             {"planId": plan_id},
           ),
         )
-        self._create_plan_follow_up(cursor, law_case, user_id, plan_id)
+        self._create_plan_follow_up(cursor, law_case, user_id, plan_id, self_service_payload)
       conn.commit()
     return law_case
 
@@ -1366,7 +1434,7 @@ class PostgresStore:
             law_case.userId or "",
             "document",
             "文书已确认",
-            f"已确认文书 {document.id}：{document.title}，案件将进入下一阶段。",
+            f"已确认《{document.title}》，平台将同步律师跟进后续处理。",
             f"/cases/{case_id}",
             case_id,
           ),
@@ -1645,6 +1713,7 @@ class PostgresStore:
           raise InvalidStateError("INVALID_STATE")
         law_case = self._case_from_row(cursor, case_row)
         document = _document_from_row(document_row)
+        _require_document_submission_fields(document)
         document.status = "pending_client_approval"
         document.updatedBy = lawyer_id
         document.updatedAt = _iso(_now())
@@ -1915,18 +1984,61 @@ class PostgresStore:
           self._insert_event(cursor, event)
       conn.commit()
 
-  def _create_plan_follow_up(self, cursor, law_case: LawCase, user_id: str, plan_id: PlanId) -> None:
+  def _create_plan_follow_up(
+    self,
+    cursor,
+    law_case: LawCase,
+    user_id: str,
+    plan_id: PlanId,
+    self_service_payload: SelfServicePayload | None = None,
+  ) -> None:
     if plan_id == "self-service":
-      summary = _ai_guidance_summary(law_case)
-      task = _new_work_item(law_case.id, "ai_guidance", "AI自助任务", summary)
+      payload = self_service_payload or build_self_service_payload(law_case)
+      task = _new_work_item(law_case.id, "ai_guidance", "AI自助任务", payload.taskSummary)
+      task.status = "completed"
+      task.updatedAt = _iso(_now())
       self._insert_work_item(cursor, task)
+      document = _new_document(
+        law_case.id,
+        user_id,
+        CreateDocumentInput(
+          type=payload.documentType,
+          title=payload.title,
+          fields=payload.fields,
+          body=payload.body,
+        ),
+      )
+      document.status = "approved"
+      self._insert_document(cursor, document)
+      apply_self_service_outcome(law_case, payload, _format_datetime(_now()))
+      self._update_case_state(cursor, law_case)
+      self._insert_event(
+        cursor,
+        _new_event(
+          law_case.id,
+          "document.updated",
+          "AI自助文书已生成",
+          payload.title,
+          {"documentId": document.id, "documentType": document.type, "source": "ai_self_service"},
+        ),
+      )
+      self._insert_event(
+        cursor,
+        _new_event(
+          law_case.id,
+          "task.updated",
+          "AI自助任务已完成",
+          payload.taskSummary,
+          {"workItemId": task.id},
+        ),
+      )
       self._insert_message(
         cursor,
         _new_message(
           user_id,
-          "task",
-          "AI自助流程已启动",
-          summary,
+          "document",
+          payload.messageTitle,
+          payload.messageBody,
           f"/cases/{law_case.id}",
           law_case.id,
         ),
@@ -2194,7 +2306,11 @@ def _mark_evidence_uploaded(law_case: LawCase, category: EvidenceCategory) -> No
 
 def _apply_selected_plan(law_case: LawCase, plan_id: PlanId) -> None:
   law_case.selectedPlan = plan_id
-  law_case.status = "AI方案处理中" if plan_id == "self-service" else "律师复核中"
+  if plan_id == "self-service":
+    # 自助路径不进入律师复核语义，最终阶段/状态由 AI 闭环写入。
+    law_case.status = "AI方案处理中"
+    return
+  law_case.status = "律师复核中"
   review_stage = next((stage for stage in law_case.stages if stage.key == "review"), None)
   if review_stage is not None:
     review_stage.status = "active"
@@ -2240,6 +2356,30 @@ def _new_work_item(
     createdAt=now,
     updatedAt=now,
   )
+
+
+def _missing_required_evidence(law_case: LawCase) -> list[str]:
+  return [
+    category.name
+    for category in law_case.evidence
+    if category.required and not category.files and category.status != "recognized"
+  ]
+
+
+def _require_required_evidence(law_case: LawCase) -> None:
+  if _missing_required_evidence(law_case):
+    raise InvalidStateError("REQUIRED_EVIDENCE_MISSING")
+
+
+def _document_field_value(document: LegalDocument, field_name: str) -> str:
+  value = document.fields.get(field_name)
+  return str(value).strip() if value is not None else ""
+
+
+def _require_document_submission_fields(document: LegalDocument) -> None:
+  required_fields = ("recipient", "request", "deadline")
+  if any(not _document_field_value(document, field_name) for field_name in required_fields):
+    raise InvalidStateError("REQUIRED_DOCUMENT_FIELDS_MISSING")
 
 
 def _ai_guidance_summary(law_case: LawCase) -> str:

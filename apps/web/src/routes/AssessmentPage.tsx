@@ -40,6 +40,20 @@ export function AssessmentPage() {
               <span className="mt-1 block text-sm leading-6">系统会读取案件事实、核验证据完整度，并生成胜率与路径建议。</span>
             </div>
           </div>
+          {hasMissingRequiredEvidence && (
+            <div className="rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm font-semibold leading-6 text-amber-800">
+              <span className="flex items-center gap-2 font-black">
+                <AlertTriangle size={17} />
+                必传材料未补齐
+              </span>
+              <span className="mt-1 block">
+                还缺 {missingRequiredEvidence.map((item) => item.name).join('、')}，补齐后才能开始评估。
+              </span>
+              <Link to="/cases/$caseId/evidence" params={{ caseId }} className="mt-3 inline-flex h-10 items-center rounded-lg bg-white px-4 font-black text-amber-800">
+                去补充证据
+              </Link>
+            </div>
+          )}
           {['读取案件事实', '核验证据完整度', '生成胜率与路径'].map((item, index) => (
             <div key={item} className="flex items-center gap-3 rounded-lg bg-slate-50 p-3">
               <span className={`grid size-9 place-items-center rounded-full ${index === 0 ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'}`}>
@@ -49,8 +63,8 @@ export function AssessmentPage() {
             </div>
           ))}
           {evaluate.isError && <div className="rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">评估失败，请稍后重试。</div>}
-          <button className="h-12 w-full rounded-lg bg-blue-600 font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="button" disabled={evaluate.isPending} onClick={() => evaluate.mutate(undefined)}>
-            {evaluate.isPending ? '评估中' : '开始评估'}
+          <button className="h-12 w-full rounded-lg bg-blue-600 px-3 font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="button" disabled={evaluate.isPending || hasMissingRequiredEvidence} onClick={() => evaluate.mutate(undefined)}>
+            {hasMissingRequiredEvidence ? '请先补齐必传材料' : evaluate.isPending ? '评估中' : '开始评估'}
           </button>
         </section>
       )}

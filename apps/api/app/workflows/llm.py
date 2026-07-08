@@ -127,6 +127,90 @@ def generate_assessment_with_llm(
     return None
 
 
+def generate_self_service_document_body(
+  settings: Settings,
+  law_case: LawCase,
+  template_body: str,
+) -> str | None:
+  api_base = _clean_string(settings.OPENAI_API_BASE)
+  api_key = _secret_string(settings.OPENAI_API_KEY)
+  model = _clean_string(settings.DEFAULT_LLM_MODEL)
+  if api_base is None or api_key is None or model is None:
+    logger.info(
+      "self_service.llm skipped not_configured case_id=%s case_type=%s",
+      law_case.id,
+      law_case.caseType,
+    )
+    return None
+
+  payload = {
+    "model": model,
+    "temperature": settings.DEFAULT_LLM_TEMPERATURE,
+    "messages": [
+      {
+        "role": "system",
+        "content": (
+          "You are a Chinese legal document drafting assistant. Improve the provided "
+          "draft while keeping its section structure, facts, amounts, and compliance "
+          "notices unchanged in meaning. Return strict JSON only with a single key "
+          '"body" containing the improved document text in Chinese.'
+        ),
+      },
+      {
+        "role": "user",
+        "content": json.dumps(
+          {"case": law_case.model_dump(mode="json"), "draftBody": template_body},
+          ensure_ascii=False,
+        ),
+      },
+    ],
+  }
+
+  logger.info(
+    "self_service.llm call_started case_id=%s case_type=%s model=%s",
+    law_case.id,
+    law_case.caseType,
+    model,
+  )
+  try:
+    response = httpx.post(
+      f"{api_base.rstrip('/')}/chat/completions",
+      headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+      },
+      json=payload,
+      timeout=8.0,
+    )
+    response.raise_for_status()
+    llm_payload = _parse_chat_completion(response.json())
+    body = llm_payload.get("body") if llm_payload is not None else None
+    if not isinstance(body, str) or len(body.strip()) < 20:
+      logger.info(
+        "self_service.llm call_failed case_id=%s case_type=%s model=%s reason=invalid_response",
+        law_case.id,
+        law_case.caseType,
+        model,
+      )
+      return None
+    logger.info(
+      "self_service.llm call_success case_id=%s case_type=%s model=%s",
+      law_case.id,
+      law_case.caseType,
+      model,
+    )
+    return body.strip()
+  except (httpx.HTTPError, json.JSONDecodeError, TypeError, KeyError, ValidationError) as exc:
+    logger.info(
+      "self_service.llm call_failed case_id=%s case_type=%s model=%s reason=%s",
+      law_case.id,
+      law_case.caseType,
+      model,
+      _safe_error_reason(exc),
+    )
+    return None
+
+
 def _parse_chat_completion(payload: Mapping[str, Any]) -> dict[str, Any] | None:
   choices = payload.get("choices")
   if not isinstance(choices, list) or not choices:

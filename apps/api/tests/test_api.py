@@ -40,6 +40,7 @@ def test_minimal_case_workflow() -> None:
   assert contract["status"] == "recognized"
   assert contract["files"][0]["name"] == "contract.pdf"
   assert upload.json()["file"]["name"] == "contract.pdf"
+  _upload_required_evidence(client, headers, case_id)
 
   evaluated = client.post(f"/api/v1/cases/{case_id}/evaluate", headers=headers)
   assert evaluated.status_code == 200
@@ -72,11 +73,46 @@ def test_minimal_case_workflow() -> None:
   assert "event: plan.selected" in updated_event_body
 
 
+def test_evaluate_requires_required_evidence() -> None:
+  client = TestClient(create_app(_test_settings()))
+  headers = _register_client(client)
+  case_id = _create_case(client, headers)
+
+  evaluated = client.post(f"/api/v1/cases/{case_id}/evaluate", headers=headers)
+
+  assert evaluated.status_code == 409
+  assert evaluated.json()["detail"] == "REQUIRED_EVIDENCE_MISSING"
+
+
+def test_plan_selection_rejects_stale_assessment_with_missing_required_evidence() -> None:
+  client = TestClient(create_app(_test_settings()))
+  headers = _register_client(client)
+  case_id = _create_case(client, headers)
+  _upload_required_evidence(client, headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=headers).status_code == 200
+
+  law_case = client.app.state.store._cases[case_id]
+  for category in law_case.evidence:
+    if category.required:
+      category.files.clear()
+      category.status = "pending"
+
+  selected = client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=headers,
+    json={"planId": "lawyer-review"},
+  )
+
+  assert selected.status_code == 409
+  assert selected.json()["detail"] == "REQUIRED_EVIDENCE_MISSING"
+
+
 def test_plan_selection_is_idempotent_and_rejects_switching() -> None:
   client = TestClient(create_app(_test_settings()))
   client_headers = _register_client(client, phone="13800001234")
   lawyer_headers = _create_approved_lawyer(client)
   case_id = _create_case(client, client_headers)
+  _upload_required_evidence(client, client_headers, case_id)
   assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
 
   selected = client.post(
@@ -122,6 +158,7 @@ def test_lawyer_review_document_closed_loop() -> None:
     files={"file": ("contract.pdf", b"contract bytes", "application/pdf")},
   )
   assert upload.status_code == 200
+  _upload_required_evidence(client, client_headers, case_id)
   assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
 
   selected = client.post(
@@ -188,6 +225,13 @@ def test_lawyer_review_document_closed_loop() -> None:
   assert premature_approval.status_code == 409
   assert premature_approval.json()["detail"] == "INVALID_STATE"
 
+  incomplete_document_submit = client.post(
+    f"/api/v1/lawyer/cases/{case_id}/documents/{document['id']}/submit",
+    headers=lawyer_headers,
+  )
+  assert incomplete_document_submit.status_code == 409
+  assert incomplete_document_submit.json()["detail"] == "REQUIRED_DOCUMENT_FIELDS_MISSING"
+
   updated_document = client.patch(
     f"/api/v1/lawyer/cases/{case_id}/documents/{document['id']}",
     headers=lawyer_headers,
@@ -233,9 +277,10 @@ def test_lawyer_review_document_closed_loop() -> None:
   messages_after_approval = client.get("/api/v1/messages", headers=client_headers)
   assert messages_after_approval.status_code == 200
   assert any(
-    message["title"] == "文书已确认" and document["id"] in message["body"]
+    message["title"] == "文书已确认" and "正式催款律师函" in message["body"] and document["id"] not in message["body"]
     for message in messages_after_approval.json()["messages"]
   )
+  assert all("doc-" not in message["body"] for message in messages_after_approval.json()["messages"] if message["title"] == "文书已确认")
 
   updated_approved_document = client.patch(
     f"/api/v1/lawyer/cases/{case_id}/documents/{document['id']}",
@@ -263,7 +308,9 @@ def test_lawyer_review_document_closed_loop() -> None:
 def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
   client = TestClient(create_app(_test_settings()))
   client_headers = _register_client(client, phone="13800001234")
+  lawyer_headers = _create_approved_lawyer(client)
   case_id = _create_case(client, client_headers)
+  _upload_required_evidence(client, client_headers, case_id)
   assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
 
   selected = client.post(
@@ -272,15 +319,51 @@ def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
     json={"planId": "self-service"},
   )
   assert selected.status_code == 200
-  assert selected.json()["case"]["status"] == "AI方案处理中"
+  selected_case = selected.json()["case"]
+  assert selected_case["selectedPlan"] == "self-service"
+  assert selected_case["status"].startswith("AI自助处理完成：")
+  assert "律师复核" not in selected_case["status"]
+  review_stage = next(stage for stage in selected_case["stages"] if stage["key"] == "review")
+  active_stage = next(stage for stage in selected_case["stages"] if stage["status"] == "active")
+  assert review_stage["status"] == "done"
+  assert "律师复核" not in active_stage["title"]
 
   work_items = client.get(f"/api/v1/cases/{case_id}/work-items", headers=client_headers)
   assert work_items.status_code == 200
   ai_items = [item for item in work_items.json()["workItems"] if item["kind"] == "ai_guidance"]
   assert len(ai_items) == 1
-  assert "补充" in ai_items[0]["summary"]
+  assert ai_items[0]["status"] == "completed"
   assert "草稿" in ai_items[0]["summary"]
   assert "下一步" in ai_items[0]["summary"]
+  assert [item for item in work_items.json()["workItems"] if item["kind"] == "lawyer_review"] == []
+
+  documents = client.get(f"/api/v1/cases/{case_id}/documents", headers=client_headers)
+  assert documents.status_code == 200
+  self_service_documents = [
+    document
+    for document in documents.json()["documents"]
+    if document["fields"].get("source") == "ai_self_service"
+  ]
+  assert len(self_service_documents) == 1
+  document = self_service_documents[0]
+  assert document["type"] == "lawyer_letter"
+  assert document["status"] == "approved"
+  assert "人工智能（AI）生成" in document["body"]
+  assert document["fields"]["generatedAt"]
+
+  messages = client.get("/api/v1/messages", headers=client_headers)
+  assert messages.status_code == 200
+  assert any(message["title"] == "AI自助处理结果已生成" for message in messages.json()["messages"])
+
+  lawyer_tasks = client.get("/api/v1/lawyer/tasks", headers=lawyer_headers)
+  assert lawyer_tasks.status_code == 200
+  assert lawyer_tasks.json()["tasks"] == []
+
+  with client.stream("GET", f"/api/v1/cases/{case_id}/events", headers=client_headers) as events:
+    assert events.status_code == 200
+    event_body = "".join(events.iter_text())
+  assert "event: document.updated" in event_body
+  assert "event: task.updated" in event_body
 
   selected_again = client.post(
     f"/api/v1/cases/{case_id}/plan",
@@ -291,6 +374,13 @@ def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
   repeated_work_items = client.get(f"/api/v1/cases/{case_id}/work-items", headers=client_headers)
   repeated_ai_items = [item for item in repeated_work_items.json()["workItems"] if item["kind"] == "ai_guidance"]
   assert len(repeated_ai_items) == 1
+  repeated_documents = client.get(f"/api/v1/cases/{case_id}/documents", headers=client_headers)
+  repeated_self_service_documents = [
+    document
+    for document in repeated_documents.json()["documents"]
+    if document["fields"].get("source") == "ai_self_service"
+  ]
+  assert len(repeated_self_service_documents) == 1
 
 
 def test_lawyer_can_read_case_evidence_file(tmp_path: Path) -> None:
@@ -306,6 +396,7 @@ def test_lawyer_can_read_case_evidence_file(tmp_path: Path) -> None:
   )
   assert upload.status_code == 200
   file_id = upload.json()["file"]["id"]
+  _upload_required_evidence(client, client_headers, case_id)
   assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
   assert client.post(
     f"/api/v1/cases/{case_id}/plan",
@@ -346,6 +437,7 @@ def test_assessment_failure_is_recorded_as_event(monkeypatch) -> None:
 
   monkeypatch.setattr(store_module, "assess_case", fail_assessment)
 
+  _upload_required_evidence(client, headers, case_id)
   evaluated = client.post(f"/api/v1/cases/{case_id}/evaluate", headers=headers)
   assert evaluated.status_code == 200
   response = evaluated.json()
@@ -708,3 +800,17 @@ def _create_case(client: TestClient, headers: dict[str, str]) -> str:
   case_id = law_case["id"]
   assert law_case["status"] == "待补充证据"
   return case_id
+
+
+def _upload_required_evidence(client: TestClient, headers: dict[str, str], case_id: str) -> None:
+  current = client.get(f"/api/v1/cases/{case_id}", headers=headers)
+  assert current.status_code == 200
+  for category in current.json()["case"]["evidence"]:
+    if not category["required"] or category["files"] or category["status"] == "recognized":
+      continue
+    uploaded = client.post(
+      f"/api/v1/cases/{case_id}/evidence/{category['id']}",
+      headers=headers,
+      files={"file": (f"{category['id']}.pdf", f"{category['name']} bytes".encode(), "application/pdf")},
+    )
+    assert uploaded.status_code == 200

@@ -283,7 +283,19 @@ export function useEvaluateCaseMutation(caseId: string) {
 }
 
 export function useSelectPlanMutation(caseId: string) {
-  return useCaseMutation(caseId, (planId: PlanId) => selectCasePlan(caseId, planId));
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (planId: PlanId) => selectCasePlan(caseId, planId),
+    onSuccess: async (lawCase) => {
+      queryClient.setQueryData(caseKeys.detail(caseId), lawCase);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: caseKeys.lists }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.workItems(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.documents(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.messages })
+      ]);
+    }
+  });
 }
 
 export function useMarkMessageReadMutation() {

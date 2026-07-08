@@ -1,5 +1,6 @@
 import { Link, useParams } from '@tanstack/react-router';
 import { ArrowLeft, Check, ChevronRight, CloudUpload, Contact, FileCheck2, FileSearch, Headphones, MessageCircle, Radio, Scale } from 'lucide-react';
+import { useState } from 'react';
 import { MetricCard } from '../components/h5/MetricCard';
 import { SectionHeader } from '../components/h5/SectionHeader';
 import { Timeline } from '../components/h5/Timeline';
@@ -18,6 +19,7 @@ export function CaseDetailPage() {
   const approveDocument = useApproveDocumentMutation(caseId);
   const { events, connected } = useCaseEvents(caseId, Boolean(caseQuery.data));
   const lawCase = caseQuery.data;
+  const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<string>>(() => new Set());
 
   if (caseQuery.isPending) return <StateBlock title="案件加载中" />;
   if (!lawCase) return <StateBlock title="案件不存在" />;
@@ -26,11 +28,39 @@ export function CaseDetailPage() {
   const stages = stageProgress(lawCase.stages);
   const latest = deriveLatestProgress(lawCase, events);
   const catalog = getCaseCatalogItem(lawCase.caseType);
-  const nextHref = lawCase.assessment ? (lawCase.selectedPlan ? '/messages' : `/cases/${caseId}/plans`) : `/cases/${caseId}/assessment`;
   const workItems = workItemsQuery.data ?? [];
   const documents = documentsQuery.data ?? [];
-  const pendingDocuments = documents.filter((document) => document.status === 'pending_client_approval');
-  const serviceTitle = lawCase.selectedPlan === 'self-service' ? 'AI自助引导' : lawCase.selectedPlan ? '律师服务闭环' : '服务待选择';
+  const isSelfService = lawCase.selectedPlan === 'self-service';
+  const pendingDocuments = isSelfService ? [] : documents.filter((document) => document.status === 'pending_client_approval');
+  const selfServiceDocuments = isSelfService
+    ? documents.filter((document) => document.status === 'approved' && document.fields.source === 'ai_self_service')
+    : [];
+  const missingRequiredEvidence = lawCase.evidence.filter((category) =>
+    category.required && category.files.length === 0 && category.status !== 'recognized'
+  );
+  const nextAction = missingRequiredEvidence.length > 0
+    ? { href: `/cases/${caseId}/evidence`, label: '补充必传证据' }
+    : !lawCase.assessment
+      ? { href: `/cases/${caseId}/assessment`, label: '生成AI评估' }
+      : !lawCase.selectedPlan
+        ? { href: `/cases/${caseId}/plans`, label: '选择服务方案' }
+        : pendingDocuments.length > 0
+          ? { href: `/cases/${caseId}#pending-documents`, label: '确认待办文书' }
+          : { href: '/messages', label: '查看服务通知' };
+  const serviceTitle = isSelfService ? 'AI自助处理结果' : lawCase.selectedPlan ? '律师服务闭环' : '服务待选择';
+  const serviceSubtitle = isSelfService ? 'AI生成的处理结果、待办状态和客户可见文书会在这里汇总' : '服务方案选择后，待办、复核意见和文书确认会在这里汇总';
+
+  function toggleDocument(documentId: string) {
+    setExpandedDocumentIds((current) => {
+      const next = new Set(current);
+      if (next.has(documentId)) {
+        next.delete(documentId);
+      } else {
+        next.add(documentId);
+      }
+      return next;
+    });
+  }
 
   return (
     <div className="space-y-5">
@@ -93,27 +123,47 @@ export function CaseDetailPage() {
           <span className="ml-auto text-xs font-semibold opacity-70">{latest.time}</span>
         </div>
         <p className="mt-2 break-words text-sm leading-6">{latest.body}</p>
-        <a href={latest.href} className="mt-3 flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm font-bold">
-          平台建议：查看下一步处理
+        <a href={nextAction.href || latest.href} className="mt-3 flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm font-bold">
+          平台建议：{nextAction.label}
           <ChevronRight size={17} />
         </a>
       </section>
 
       {lawCase.selectedPlan && (
-        <section className="rounded-lg bg-white p-4 shadow-sm">
-          <SectionHeader title={serviceTitle} subtitle="服务方案选择后，待办、复核意见和文书确认会在这里汇总" />
+        <section id="pending-documents" className="rounded-lg bg-white p-4 shadow-sm">
+          <SectionHeader title={serviceTitle} subtitle={serviceSubtitle} />
           <div className="mt-4 space-y-3">
             {workItems.map((item) => (
               <div key={item.id} className="rounded-lg bg-slate-50 p-3 text-sm leading-6">
                 <div className="flex items-center justify-between gap-3">
                   <strong>{item.title}</strong>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${item.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
-                    {item.status === 'completed' ? '已完成' : '处理中'}
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${workItemStatusClass(item.status)}`}>
+                    {workItemStatusLabel(item.status)}
                   </span>
                 </div>
                 <p className="mt-1 text-slate-500">{item.summary}</p>
               </div>
             ))}
+            {selfServiceDocuments.map((document) => {
+              const expanded = expandedDocumentIds.has(document.id);
+              return (
+                <div key={document.id} className="rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm leading-6 text-emerald-950">
+                  <div className="flex items-start justify-between gap-3">
+                    <strong className="min-w-0 break-words">{document.title}</strong>
+                    <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-black text-emerald-700">AI生成</span>
+                  </div>
+                  <p className={`mt-2 whitespace-pre-wrap break-words text-slate-600 ${expanded ? '' : 'max-h-24 overflow-hidden'}`}>
+                    {document.body}
+                  </p>
+                  <div className="mt-2 flex items-center justify-between gap-3 text-xs font-semibold text-emerald-800">
+                    <span>下一步建议见 AI 自助任务摘要</span>
+                    <button className="shrink-0 font-black text-emerald-700" type="button" onClick={() => toggleDocument(document.id)}>
+                      {expanded ? '收起全文' : '展开全文'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
             {pendingDocuments.map((document) => (
               <div key={document.id} className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm leading-6 text-blue-900">
                 <strong className="block">{document.title}</strong>
@@ -128,7 +178,7 @@ export function CaseDetailPage() {
                 </button>
               </div>
             ))}
-            {workItems.length === 0 && pendingDocuments.length === 0 && (
+            {workItems.length === 0 && pendingDocuments.length === 0 && selfServiceDocuments.length === 0 && (
               <p className="rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-500">等待系统生成服务待办。</p>
             )}
           </div>
@@ -177,12 +227,42 @@ export function CaseDetailPage() {
             <small className="block text-sm font-semibold text-slate-500">咨询案件进展</small>
           </span>
         </Link>
-        <a href={nextHref} className="flex h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white shadow-sm shadow-blue-100">
+        <a href={nextAction.href} className="flex h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 font-black text-white shadow-sm shadow-blue-100">
           <Headphones size={18} />
-          查看下一步建议
+          {nextAction.label}
           <ChevronRight size={18} />
         </a>
       </section>
     </div>
   );
+}
+
+function workItemStatusLabel(status: string) {
+  switch (status) {
+    case 'pending':
+      return '待处理';
+    case 'in_progress':
+      return '处理中';
+    case 'completed':
+      return '已完成';
+    case 'cancelled':
+      return '已取消';
+    default:
+      return status;
+  }
+}
+
+function workItemStatusClass(status: string) {
+  switch (status) {
+    case 'pending':
+      return 'bg-slate-100 text-slate-600';
+    case 'in_progress':
+      return 'bg-blue-100 text-blue-700';
+    case 'completed':
+      return 'bg-emerald-100 text-emerald-700';
+    case 'cancelled':
+      return 'bg-slate-200 text-slate-500';
+    default:
+      return 'bg-slate-100 text-slate-600';
+  }
 }

@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { ArrowLeft, Camera, Check, FileText } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Camera, Check, FileText } from 'lucide-react';
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { EvidenceUploadPanel } from '../components/h5/EvidenceUploadPanel';
 import { SectionHeader } from '../components/h5/SectionHeader';
@@ -39,6 +39,14 @@ export function EvidencePage() {
   }
 
   if (!lawCase) return <StateBlock title="证据清单加载中" />;
+  const missingRequiredEvidence = lawCase.evidence.filter((category) =>
+    category.required && category.files.length === 0 && category.status !== 'recognized'
+  );
+  const hasMissingRequiredEvidence = missingRequiredEvidence.length > 0;
+  const recognitionFindings = (
+    lawCase.assessment?.findings.map((finding, index) => ({ key: `assessment-${index}`, text: finding })) ??
+    lawCase.evidence.flatMap((item) => item.insight ? [{ key: `evidence-${item.id}`, text: item.insight }] : [])
+  ).slice(0, 3);
 
   return (
     <div className="space-y-5">
@@ -102,10 +110,10 @@ export function EvidencePage() {
       <section className="rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
         <SectionHeader title="AI初步识别" subtitle="基于已上传证据生成" />
         <div className="mt-3 space-y-2">
-          {(lawCase.assessment?.findings ?? lawCase.evidence.flatMap((item) => item.insight ? [item.insight] : [])).slice(0, 3).map((finding) => (
-            <p className="flex gap-2 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700" key={finding}>
+          {recognitionFindings.map((finding) => (
+            <p className="flex gap-2 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700" key={finding.key}>
               <Check className="mt-0.5 shrink-0 text-emerald-600" size={16} />
-              <span className="break-words">{finding}</span>
+              <span className="break-words">{finding.text}</span>
             </p>
           ))}
           {!lawCase.assessment && lawCase.evidence.every((item) => !item.insight) && (
@@ -115,13 +123,24 @@ export function EvidencePage() {
       </section>
 
       {upload.isError && <div className="rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">上传失败，请检查文件大小和网络。</div>}
+      {hasMissingRequiredEvidence && (
+        <div className="rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm font-semibold leading-6 text-amber-800">
+          <span className="flex items-center gap-2 font-black">
+            <AlertTriangle size={17} />
+            还需补充必传材料
+          </span>
+          <span className="mt-1 block">
+            {missingRequiredEvidence.map((item) => item.name).join('、')} 上传后才能生成方案。
+          </span>
+        </div>
+      )}
       <div className="sticky bottom-20 grid grid-cols-[0.9fr_1.1fr] gap-2">
         <button className="flex h-12 items-center justify-center gap-2 rounded-lg bg-white font-black text-slate-800 shadow-sm" type="button" onClick={() => fileRef.current?.click()}>
           <Camera size={18} />
           拍照
         </button>
-        <button className="h-12 rounded-lg bg-blue-600 font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="button" disabled={evaluate.isPending} onClick={handleEvaluate}>
-          下一步：生成方案
+        <button className="h-12 rounded-lg bg-blue-600 px-3 font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50" type="button" disabled={evaluate.isPending || hasMissingRequiredEvidence} onClick={handleEvaluate}>
+          {hasMissingRequiredEvidence ? '请先补齐必传材料' : '下一步：生成方案'}
         </button>
       </div>
     </div>
