@@ -4,7 +4,8 @@ import { FormEvent, useState } from 'react';
 import { SectionHeader } from '../components/h5/SectionHeader';
 import { StateBlock } from '../components/StateBlock';
 import { useLawyerCaseDocumentsQuery, useLawyerTaskQuery, useSubmitDocumentMutation, useSubmitReviewMutation } from '../hooks/useCaseQueries';
-import type { ReviewNextAction, RiskLevel } from '../lib/types';
+import { getLawyerEvidenceFile } from '../lib/api';
+import type { EvidenceFile, ReviewNextAction, RiskLevel } from '../lib/types';
 
 const nextActionOptions: Array<{ value: ReviewNextAction; label: string }> = [
   { value: 'draft_lawyer_letter', label: '起草律师函' },
@@ -27,6 +28,8 @@ export function LawyerTaskPage() {
   const [evidenceGaps, setEvidenceGaps] = useState('补充最近一次催款聊天记录');
   const [advice, setAdvice] = useState('建议先发送律师函，保留后续诉讼准备。');
   const [nextAction, setNextAction] = useState<ReviewNextAction>('draft_lawyer_letter');
+  const [openingEvidenceFileId, setOpeningEvidenceFileId] = useState<string | null>(null);
+  const [evidenceOpenError, setEvidenceOpenError] = useState('');
 
   async function handleReview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,6 +40,38 @@ export function LawyerTaskPage() {
       advice,
       nextAction
     });
+  }
+
+  async function handleOpenEvidenceFile(categoryId: string, file: EvidenceFile) {
+    if (!lawCase) return;
+    const canPreview = file.mimeType.startsWith('image/') || file.mimeType === 'application/pdf';
+    const previewWindow = canPreview ? window.open('', '_blank') : null;
+    setOpeningEvidenceFileId(file.id);
+    setEvidenceOpenError('');
+    try {
+      const blob = await getLawyerEvidenceFile(lawCase.id, categoryId, file.id);
+      const objectUrl = URL.createObjectURL(blob);
+      if (canPreview) {
+        if (previewWindow) {
+          previewWindow.location.href = objectUrl;
+        } else {
+          window.open(objectUrl, '_blank');
+        }
+      } else {
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = file.name;
+        document.body.append(link);
+        link.click();
+        link.remove();
+      }
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch {
+      if (previewWindow && !previewWindow.closed) previewWindow.close();
+      setEvidenceOpenError('材料打开失败，请稍后重试');
+    } finally {
+      setOpeningEvidenceFileId(null);
+    }
   }
 
   if (taskQuery.isPending) return <StateBlock title="待办加载中" />;
@@ -82,11 +117,28 @@ export function LawyerTaskPage() {
               <FileText className={item.files.length ? 'text-emerald-600' : 'text-slate-400'} size={18} />
               <span className="min-w-0 flex-1">
                 <strong className="block">{item.name}</strong>
-                <small className="block truncate text-slate-500">{item.files[0]?.name ?? (item.required ? '必传未上传' : '可选')}</small>
+                {item.files.length ? (
+                  <span className="mt-1 block space-y-1">
+                    {item.files.map((file) => (
+                      <button
+                        key={file.id}
+                        className="block max-w-full truncate text-left text-slate-500 underline-offset-2 hover:text-blue-700 hover:underline disabled:opacity-50"
+                        type="button"
+                        disabled={openingEvidenceFileId === file.id}
+                        onClick={() => handleOpenEvidenceFile(item.id, file)}
+                      >
+                        {openingEvidenceFileId === file.id ? '打开中...' : file.name}
+                      </button>
+                    ))}
+                  </span>
+                ) : (
+                  <small className="block truncate text-slate-500">{item.required ? '必传未上传' : '可选'}</small>
+                )}
               </span>
             </div>
           ))}
         </div>
+        {evidenceOpenError && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">{evidenceOpenError}</p>}
       </section>
 
       <form className="space-y-3 rounded-lg bg-white p-4 shadow-sm" onSubmit={handleReview}>

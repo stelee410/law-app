@@ -1,7 +1,8 @@
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.auth import service as auth_service
 from app.cases import service as cases_service
@@ -306,6 +307,35 @@ def lawyer_case_documents(
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
   return {"documents": documents}
 
+
+@router.get("/lawyer/cases/{case_id}/evidence/{category_id}/files/{file_id}")
+def lawyer_evidence_file(
+  case_id: str,
+  category_id: str,
+  file_id: str,
+  current_lawyer: Annotated[User, Depends(_get_current_lawyer)],
+  store: Annotated[AppStore, Depends(_get_store)],
+  settings: Annotated[Settings, Depends(_get_settings)],
+):
+  result = store.get_lawyer_case_evidence_file(current_lawyer.id, case_id, category_id, file_id)
+  if result is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="EVIDENCE_FILE_NOT_FOUND")
+  evidence_file, storage_path = result
+  upload_root = Path(settings.UPLOAD_DIR).resolve()
+  target_path = (upload_root / storage_path).resolve()
+  try:
+    target_path.relative_to(upload_root)
+  except ValueError as exc:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="EVIDENCE_FILE_NOT_FOUND") from exc
+  if not target_path.is_file():
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="EVIDENCE_FILE_NOT_FOUND")
+  disposition = "inline" if evidence_file.mimeType.startswith("image/") or evidence_file.mimeType == "application/pdf" else "attachment"
+  return FileResponse(
+    target_path,
+    media_type=evidence_file.mimeType,
+    filename=evidence_file.name,
+    content_disposition_type=disposition,
+  )
 
 @router.patch("/lawyer/cases/{case_id}/documents/{document_id}")
 def update_lawyer_document(

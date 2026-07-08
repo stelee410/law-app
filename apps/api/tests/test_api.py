@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 os.environ["STORAGE_BACKEND"] = "memory"
 os.environ["OPENAI_API_BASE"] = ""
@@ -12,14 +13,16 @@ from app.core.config import Settings
 from app.main import create_app
 
 
-def _test_settings() -> Settings:
-  return Settings(
-    MOCK_OTP_CODE="654321",
-    STORAGE_BACKEND="memory",
-    OPENAI_API_BASE=None,
-    OPENAI_API_KEY=None,
-    DEFAULT_LLM_MODEL=None,
-  )
+def _test_settings(**overrides) -> Settings:
+  values = {
+    "MOCK_OTP_CODE": "654321",
+    "STORAGE_BACKEND": "memory",
+    "OPENAI_API_BASE": None,
+    "OPENAI_API_KEY": None,
+    "DEFAULT_LLM_MODEL": None,
+  }
+  values.update(overrides)
+  return Settings(**values)
 
 
 def test_minimal_case_workflow() -> None:
@@ -248,6 +251,49 @@ def test_lawyer_review_document_closed_loop() -> None:
   )
   assert archived_document.status_code == 409
   assert archived_document.json()["detail"] == "INVALID_STATE"
+
+
+def test_lawyer_can_read_case_evidence_file(tmp_path: Path) -> None:
+  client = TestClient(create_app(_test_settings(UPLOAD_DIR=str(tmp_path))))
+  client_headers = _login(client, phone="13800001234")
+  lawyer_headers = _login(client, phone="13900009999")
+  case_id = _create_case(client, client_headers)
+
+  upload = client.post(
+    f"/api/v1/cases/{case_id}/evidence/contract",
+    headers=client_headers,
+    files={"file": ("contract.pdf", b"contract bytes", "application/pdf")},
+  )
+  assert upload.status_code == 200
+  file_id = upload.json()["file"]["id"]
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+  assert client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "lawyer-review"},
+  ).status_code == 200
+
+  evidence_file = client.get(
+    f"/api/v1/lawyer/cases/{case_id}/evidence/contract/files/{file_id}",
+    headers=lawyer_headers,
+  )
+  assert evidence_file.status_code == 200
+  assert evidence_file.content == b"contract bytes"
+  assert evidence_file.headers["content-type"].startswith("application/pdf")
+  assert "inline" in evidence_file.headers["content-disposition"]
+
+  forbidden = client.get(
+    f"/api/v1/lawyer/cases/{case_id}/evidence/contract/files/{file_id}",
+    headers=client_headers,
+  )
+  assert forbidden.status_code == 403
+
+  missing = client.get(
+    f"/api/v1/lawyer/cases/{case_id}/evidence/contract/files/missing-file",
+    headers=lawyer_headers,
+  )
+  assert missing.status_code == 404
+  assert missing.json()["detail"] == "EVIDENCE_FILE_NOT_FOUND"
 
 
 def test_assessment_failure_is_recorded_as_event(monkeypatch) -> None:

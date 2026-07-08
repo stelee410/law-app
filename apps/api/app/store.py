@@ -73,6 +73,13 @@ class AppStore(Protocol):
   def get_lawyer_task(self, lawyer_id: str, task_id: str) -> WorkItem | None: ...
   def get_lawyer_case(self, lawyer_id: str, case_id: str) -> LawCase | None: ...
   def list_lawyer_case_documents(self, lawyer_id: str, case_id: str) -> list[LegalDocument] | None: ...
+  def get_lawyer_case_evidence_file(
+    self,
+    lawyer_id: str,
+    case_id: str,
+    category_id: str,
+    file_id: str,
+  ) -> tuple[EvidenceFile, str] | None: ...
   def submit_review(
     self,
     lawyer_id: str,
@@ -111,6 +118,7 @@ class InMemoryStore:
     self._review_opinions: dict[str, ReviewOpinion] = {}
     self._documents: dict[str, LegalDocument] = {}
     self._messages: dict[str, NotificationMessage] = {}
+    self._evidence_storage_paths: dict[str, str] = {}
 
   def request_login_code(self, phone: str) -> dict[str, str]:
     normalized_phone = _normalize_phone(phone)
@@ -202,6 +210,8 @@ class InMemoryStore:
 
     evidence_file = _new_evidence_file(file_name, file_size, mime_type)
     category.files.append(evidence_file)
+    if storage_path:
+      self._evidence_storage_paths[evidence_file.id] = storage_path
     _mark_evidence_uploaded(law_case, category)
     self._record_event(
       law_case.id,
@@ -334,6 +344,35 @@ class InMemoryStore:
       key=lambda item: item.updatedAt,
       reverse=True,
     )
+
+  def get_lawyer_case_evidence_file(
+    self,
+    lawyer_id: str,
+    case_id: str,
+    category_id: str,
+    file_id: str,
+  ) -> tuple[EvidenceFile, str] | None:
+    if not self._is_lawyer(lawyer_id):
+      return None
+    can_access_case = any(
+      item.caseId == case_id
+      and item.kind == "lawyer_review"
+      and (item.assigneeId in (None, lawyer_id) or item.status == "pending")
+      for item in self._work_items.values()
+    )
+    if not can_access_case:
+      return None
+    law_case = self._cases.get(case_id)
+    if law_case is None:
+      return None
+    category = next((item for item in law_case.evidence if item.id == category_id), None)
+    if category is None:
+      return None
+    evidence_file = next((item for item in category.files if item.id == file_id), None)
+    storage_path = self._evidence_storage_paths.get(file_id)
+    if evidence_file is None or not storage_path:
+      return None
+    return evidence_file, storage_path
 
   def submit_review(
     self,
@@ -988,6 +1027,53 @@ class PostgresStore:
         rows = cursor.fetchall()
       conn.rollback()
     return [_document_from_row(row) for row in rows]
+
+  def get_lawyer_case_evidence_file(
+    self,
+    lawyer_id: str,
+    case_id: str,
+    category_id: str,
+    file_id: str,
+  ) -> tuple[EvidenceFile, str] | None:
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        if not self._is_lawyer(cursor, lawyer_id):
+          conn.rollback()
+          return None
+        cursor.execute(
+          """
+          SELECT id FROM work_items
+          WHERE case_id = %s
+            AND kind = 'lawyer_review'
+            AND (assignee_id IS NULL OR assignee_id = %s OR status = 'pending')
+          LIMIT 1
+          """,
+          (case_id, lawyer_id),
+        )
+        if cursor.fetchone() is None:
+          conn.rollback()
+          return None
+        cursor.execute(
+          """
+          SELECT * FROM evidence_files
+          WHERE case_id = %s AND category_id = %s AND id = %s
+          """,
+          (case_id, category_id, file_id),
+        )
+        row = cursor.fetchone()
+      conn.rollback()
+    if row is None or not row["storage_path"]:
+      return None
+    return (
+      EvidenceFile(
+        id=row["id"],
+        name=row["name"],
+        size=row["size"],
+        mimeType=row["mime_type"],
+        uploadedAt=row["uploaded_at"],
+      ),
+      row["storage_path"],
+    )
 
   def submit_review(
     self,

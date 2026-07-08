@@ -458,6 +458,47 @@ describe('App', () => {
     expect(getSpy).not.toHaveBeenCalledWith('/api/v1/cases/case-test/documents');
   });
 
+  it('opens uploaded evidence files from lawyer task workspace', async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn(() => 'blob:contract');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }));
+    const previewWindow = { closed: false, close: vi.fn(), location: { href: '' } } as unknown as Window;
+    vi.spyOn(window, 'open').mockReturnValue(previewWindow);
+    const getSpy = vi.spyOn(apiModule.api, 'get').mockImplementation((url) => {
+      const path = String(url);
+      if (path.endsWith('/lawyer/cases/case-test/evidence/contract/files/file-contract')) {
+        return { blob: async () => new Blob(['pdf bytes'], { type: 'application/pdf' }) } as ReturnType<typeof apiModule.api.get>;
+      }
+      if (path.endsWith('/lawyer/cases/case-test/documents')) {
+        return { json: async () => ({ documents: [] }) } as ReturnType<typeof apiModule.api.get>;
+      }
+      if (path.endsWith('/lawyer/tasks/task-review')) {
+        return { json: async () => ({ task: lawyerTask, case: assessedCase }) } as ReturnType<typeof apiModule.api.get>;
+      }
+      return { json: async () => ({}) } as ReturnType<typeof apiModule.api.get>;
+    });
+    useAuthStore.getState().setSession({
+      token: 'lawyer-token',
+      user: testLawyer,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testLawyer);
+    queryClient.setQueryData(caseKeys.lawyerTask('task-review'), { task: lawyerTask, case: assessedCase });
+    queryClient.setQueryData(caseKeys.lawyerDocuments('case-test'), []);
+    await router.navigate({ to: '/lawyer/tasks/$taskId', params: { taskId: 'task-review' } });
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: /\.pdf$/ }));
+
+    await waitFor(() =>
+      expect(getSpy).toHaveBeenCalledWith('/api/v1/lawyer/cases/case-test/evidence/contract/files/file-contract')
+    );
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(previewWindow.location.href).toBe('blob:contract');
+  });
+
   it('disables lawyer document actions after submitting to client', async () => {
     useAuthStore.getState().setSession({
       token: 'lawyer-token',

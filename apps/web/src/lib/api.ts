@@ -137,6 +137,10 @@ export async function getLawyerCaseDocuments(caseId: string): Promise<LegalDocum
   return response.documents;
 }
 
+export async function getLawyerEvidenceFile(caseId: string, categoryId: string, fileId: string): Promise<Blob> {
+  return api.get(apiUrl(`/lawyer/cases/${caseId}/evidence/${categoryId}/files/${fileId}`)).blob();
+}
+
 export async function submitLawyerReview(taskId: string, input: SubmitReviewInput): Promise<{ case: LawCase; workItem: WorkItem; review: ReviewOpinion }> {
   return api.post(apiUrl(`/lawyer/tasks/${taskId}/review`), { json: input }).json<{ case: LawCase; workItem: WorkItem; review: ReviewOpinion }>();
 }
