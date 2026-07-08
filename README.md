@@ -63,15 +63,26 @@ package.json           # 根开发、测试、构建脚本
 ### 第一步：安装依赖
 
 ```bash
-# 根依赖：安装 concurrently 等开发脚本依赖
+# 前端 workspace 与根脚本依赖
 pnpm install
 
-# 后端依赖
+# 后端 Python 依赖；会使用 apps/api/pyproject.toml，并创建/同步 apps/api/.venv
 uv sync --directory apps/api --project .
-
-# 前端依赖（pnpm install 已覆盖 workspace 时可跳过；单独安装可用此命令）
-pnpm --dir apps/web install
 ```
+
+不要在根目录裸跑 `uv sync`。根目录不是 Python 后端项目，后端唯一 Python 项目在 `apps/api`。
+也不需要在 `apps/web` 单独维护另一套 pnpm 安装入口；根目录 `pnpm install` 会按
+`pnpm-workspace.yaml` 安装 `apps/web` 依赖。
+
+### 依赖目录边界
+
+| 路径 | 是否保留 | 说明 |
+| --- | --- | --- |
+| `node_modules` | 是 | 根 `package.json` 的脚本依赖和 pnpm workspace 入口，例如 `concurrently` |
+| `apps/web/node_modules` | 是 | pnpm 为前端 package 创建的依赖链接目录 |
+| `apps/api/.venv` | 是 | 后端 Python/FastAPI 的真实虚拟环境 |
+| `.venv` | 否 | 根目录不是 Python project，不应保留根虚拟环境 |
+| `pyproject.toml` / `uv.lock`（根目录） | 否 | 根目录不维护 Python 依赖；后端依赖文件在 `apps/api/` |
 
 ### 第二步：准备配置
 
@@ -128,15 +139,22 @@ pnpm dev
 - Web：`http://localhost:5173`
 - 健康检查：`http://localhost:4000/api/v1/health`
 
-也可以分开启动，方便分别看日志：
+也可以分开启动，方便分别看日志。后端主命令直接使用 `uv` + `uvicorn`，明确指向
+`apps/api` 这个 Python 项目：
 
 ```bash
-# 终端 1：后端 API
-pnpm dev:api
+# 终端 1：Python/FastAPI API
+uv run --directory apps/api --project . uvicorn app.main:app --reload --host 0.0.0.0 --port 4000
 
 # 终端 2：前端 Vite
 pnpm dev:web
 ```
+
+`pnpm dev:api` 只是根目录便捷别名，等价于上面的 `uv run ... uvicorn ...` 命令；
+它服务于根目录全栈脚本，不是另一套后端。
+
+如果你已经用 IDE、`uvicorn` 或其他方式启动了 Python 后端，并且它正在监听 `4000` 端口，
+就不要再运行 `pnpm dev:api`，否则会端口冲突；此时只需要运行 `pnpm dev:web`。
 
 Vite 开发服务器会把 `/api` 代理到 `http://localhost:4000`，浏览器访问 Web 即可走完整 H5 流程。
 
@@ -331,7 +349,7 @@ git diff --check
 | 现象 | 处理 |
 | --- | --- |
 | `http://localhost:5173` 打不开 | 确认 `pnpm dev:web` 或 `pnpm dev` 正在运行，且 5173 端口未被占用 |
-| API health 不通 | 确认 `pnpm dev:api` 正在运行，访问 `http://localhost:4000/api/v1/health` |
+| API health 不通 | 确认 Python/FastAPI API 正在 `4000` 端口运行；推荐直接用 `uv run --directory apps/api --project . uvicorn app.main:app --reload --host 0.0.0.0 --port 4000`，`pnpm dev:api` 只是等价别名 |
 | 前端请求 API 失败 | 开发模式检查 Vite `/api` proxy；compose 模式检查 Web 容器 `API_TARGET=http://api:4000` |
 | 登录失败 | 检查 `MOCK_OTP_CODE`，默认验证码是 `123456`，验证码也会在请求返回中给出 |
 | compose 下数据重启丢失 | 当前为 `STORAGE_BACKEND=memory`，切换到 `postgres` 并配置外部 Postgres |
