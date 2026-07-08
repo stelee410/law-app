@@ -7,6 +7,7 @@ from app.auth import service as auth_service
 from app.cases import service as cases_service
 from app.core.config import Settings
 from app.evidence import service as evidence_service
+from app.evidence.service import EvidenceUploadError
 from app.events import service as events_service
 from app.schemas import CreateCaseInput, LoginInput, RequestCodeInput, SelectPlanInput, User
 from app.store import AppStore
@@ -108,13 +109,16 @@ async def upload_evidence(
   store: Annotated[AppStore, Depends(_get_store)],
   file: UploadFile = File(...),
 ):
-  evidence_file = await evidence_service.upload_evidence(
-    store,
-    current_user.id,
-    case_id,
-    category_id,
-    file,
-  )
+  try:
+    evidence_file = await evidence_service.upload_evidence(
+      store,
+      current_user.id,
+      case_id,
+      category_id,
+      file,
+    )
+  except EvidenceUploadError as exc:
+    raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
   law_case = cases_service.get_case(store, current_user.id, case_id)
   if evidence_file is None or law_case is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="UPLOAD_FAILED")
