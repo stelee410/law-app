@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 from typing import TypedDict
 
@@ -5,6 +6,8 @@ from app.cases.catalog import get_assessment_copy, get_case_type_label
 from app.core.config import Settings
 from app.schemas import AssessmentResult, LawCase, ServicePlan
 from app.workflows import llm as llm_workflow
+
+logger = logging.getLogger("uvicorn.error")
 
 try:
   from langgraph.graph import END, START, StateGraph
@@ -205,11 +208,30 @@ def _assessment_with_optional_llm(
   if settings is not None:
     try:
       llm_assessment = llm_workflow.generate_assessment_with_llm(settings, law_case, state)
-    except Exception:
+    except Exception as exc:
+      logger.info(
+        "assessment.llm call_failed case_id=%s case_type=%s reason=unexpected_%s",
+        law_case.id,
+        law_case.caseType,
+        exc.__class__.__name__,
+      )
       llm_assessment = None
     if llm_assessment is not None:
+      logger.info(
+        "assessment.result source=llm case_id=%s case_type=%s win_rate=%s",
+        law_case.id,
+        law_case.caseType,
+        llm_assessment.winRate,
+      )
       return llm_assessment
-  return state["assessment"]
+  fallback = state["assessment"]
+  logger.info(
+    "assessment.result source=deterministic case_id=%s case_type=%s win_rate=%s",
+    law_case.id,
+    law_case.caseType,
+    fallback.winRate,
+  )
+  return fallback
 
 
 def _now_iso() -> str:

@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -7,6 +8,8 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.schemas import AssessmentResult, LawCase
+
+logger = logging.getLogger("uvicorn.error")
 
 
 def generate_assessment_with_llm(
@@ -18,10 +21,24 @@ def generate_assessment_with_llm(
   api_key = _secret_string(settings.OPENAI_API_KEY)
   model = _clean_string(settings.DEFAULT_LLM_MODEL)
   if api_base is None or api_key is None or model is None:
+    logger.info(
+      "assessment.llm skipped not_configured case_id=%s case_type=%s base_set=%s key_set=%s model_set=%s",
+      law_case.id,
+      law_case.caseType,
+      api_base is not None,
+      api_key is not None,
+      model is not None,
+    )
     return None
 
   fallback = state.get("assessment")
   if not isinstance(fallback, AssessmentResult):
+    logger.info(
+      "assessment.llm skipped missing_deterministic_result case_id=%s case_type=%s model=%s",
+      law_case.id,
+      law_case.caseType,
+      model,
+    )
     return None
 
   payload = {
@@ -58,6 +75,12 @@ def generate_assessment_with_llm(
     ],
   }
 
+  logger.info(
+    "assessment.llm call_started case_id=%s case_type=%s model=%s",
+    law_case.id,
+    law_case.caseType,
+    model,
+  )
   try:
     response = httpx.post(
       f"{api_base.rstrip('/')}/chat/completions",
@@ -71,15 +94,36 @@ def generate_assessment_with_llm(
     response.raise_for_status()
     llm_payload = _parse_chat_completion(response.json())
     if llm_payload is None:
+      logger.info(
+        "assessment.llm call_failed case_id=%s case_type=%s model=%s reason=invalid_response",
+        law_case.id,
+        law_case.caseType,
+        model,
+      )
       return None
-    return AssessmentResult.model_validate(
+    result = AssessmentResult.model_validate(
       {
         **llm_payload,
         "plans": fallback.plans,
         "generatedAt": fallback.generatedAt,
       }
     )
-  except (httpx.HTTPError, json.JSONDecodeError, TypeError, KeyError, ValidationError):
+    logger.info(
+      "assessment.llm call_success case_id=%s case_type=%s model=%s win_rate=%s",
+      law_case.id,
+      law_case.caseType,
+      model,
+      result.winRate,
+    )
+    return result
+  except (httpx.HTTPError, json.JSONDecodeError, TypeError, KeyError, ValidationError) as exc:
+    logger.info(
+      "assessment.llm call_failed case_id=%s case_type=%s model=%s reason=%s",
+      law_case.id,
+      law_case.caseType,
+      model,
+      _safe_error_reason(exc),
+    )
     return None
 
 
@@ -113,3 +157,17 @@ def _clean_string(value: str | None) -> str | None:
     return None
   stripped = value.strip()
   return stripped or None
+
+
+def _safe_error_reason(exc: Exception) -> str:
+  if isinstance(exc, httpx.HTTPStatusError):
+    return f"http_status_{exc.response.status_code}"
+  if isinstance(exc, httpx.TimeoutException):
+    return "timeout"
+  if isinstance(exc, httpx.HTTPError):
+    return exc.__class__.__name__
+  if isinstance(exc, json.JSONDecodeError):
+    return "json_decode_error"
+  if isinstance(exc, ValidationError):
+    return "validation_error"
+  return exc.__class__.__name__

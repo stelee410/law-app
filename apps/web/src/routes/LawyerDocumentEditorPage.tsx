@@ -10,13 +10,21 @@ import {
   useSubmitDocumentMutation,
   useUpdateDocumentMutation
 } from '../hooks/useCaseQueries';
-import type { LegalDocumentType } from '../lib/types';
+import type { LegalDocumentStatus, LegalDocumentType } from '../lib/types';
 
 const documentTypes: Array<{ value: LegalDocumentType; label: string }> = [
   { value: 'lawyer_letter', label: '律师函' },
   { value: 'arbitration_material', label: '仲裁材料' },
   { value: 'contract_review_opinion', label: '合同审查意见' }
 ];
+
+const statusLabels: Record<LegalDocumentStatus, string> = {
+  draft: '草稿',
+  pending_client_approval: '待客户确认',
+  approved: '已确认',
+  sent: '已发送',
+  archived: '已归档'
+};
 
 export function LawyerDocumentEditorPage() {
   const navigate = useNavigate();
@@ -35,6 +43,7 @@ export function LawyerDocumentEditorPage() {
   const [deadline, setDeadline] = useState('');
   const [body, setBody] = useState('请贵司收到本函后及时履行付款或处理义务。');
   const isDraft = isNew || document?.status === 'draft';
+  const readOnly = !isDraft;
 
   useEffect(() => {
     if (!document) return;
@@ -48,6 +57,7 @@ export function LawyerDocumentEditorPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (readOnly) return;
     const fields = { recipient, request, deadline };
     if (isNew) {
       const created = await createDocument.mutateAsync({ type, title, fields, body });
@@ -79,7 +89,19 @@ export function LawyerDocumentEditorPage() {
       </Link>
 
       <form className="space-y-4 rounded-lg bg-white p-4 shadow-sm" onSubmit={handleSubmit}>
-        <SectionHeader title={isNew ? '新增法律文书' : '编辑法律文书'} subtitle="结构化字段用于生成和审查，正文保留律师可编辑空间" />
+        <div className="flex items-start justify-between gap-3">
+          <SectionHeader title={isNew ? '新增法律文书' : '编辑法律文书'} subtitle="结构化字段用于生成和审查，正文保留律师可编辑空间" />
+          {!isNew && document && (
+            <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">
+              {statusLabels[document.status]}
+            </span>
+          )}
+        </div>
+        {readOnly && (
+          <div className="rounded-lg bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-600">
+            当前文书已进入确认或归档状态，仅可查看，不可继续编辑。
+          </div>
+        )}
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">文书类型</span>
           <select className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value={type} onChange={(event) => setType(event.target.value as LegalDocumentType)} disabled={!isNew}>
@@ -88,16 +110,25 @@ export function LawyerDocumentEditorPage() {
         </label>
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">标题</span>
-          <input className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-500 focus:bg-white" value={title} onChange={(event) => setTitle(event.target.value)} />
+          <input className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-500 focus:bg-white disabled:text-slate-500" value={title} onChange={(event) => setTitle(event.target.value)} disabled={readOnly} />
         </label>
         <div className="grid grid-cols-1 gap-3">
-          <input className="h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-500 focus:bg-white" value={recipient} onChange={(event) => setRecipient(event.target.value)} placeholder="收件人 / 对方当事人" />
-          <input className="h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-500 focus:bg-white" value={request} onChange={(event) => setRequest(event.target.value)} placeholder="请求事项 / 审查目标" />
-          <input className="h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-500 focus:bg-white" value={deadline} onChange={(event) => setDeadline(event.target.value)} placeholder="履行期限 / 交付期限" />
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">收件人 / 对方当事人</span>
+            <input className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-500 focus:bg-white disabled:text-slate-500" value={recipient} onChange={(event) => setRecipient(event.target.value)} disabled={readOnly} />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">请求事项 / 审查目标</span>
+            <input className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-500 focus:bg-white disabled:text-slate-500" value={request} onChange={(event) => setRequest(event.target.value)} disabled={readOnly} />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">履行期限 / 交付期限</span>
+            <input className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-500 focus:bg-white disabled:text-slate-500" value={deadline} onChange={(event) => setDeadline(event.target.value)} disabled={readOnly} />
+          </label>
         </div>
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">正文</span>
-          <textarea className="min-h-56 w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-6 outline-none focus:border-blue-500 focus:bg-white" value={body} onChange={(event) => setBody(event.target.value)} />
+          <textarea className="min-h-56 w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-6 outline-none focus:border-blue-500 focus:bg-white disabled:text-slate-500" value={body} onChange={(event) => setBody(event.target.value)} disabled={readOnly} />
         </label>
         <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white disabled:opacity-50" type="submit" disabled={createDocument.isPending || updateDocument.isPending || !isDraft}>
           <Save size={18} />

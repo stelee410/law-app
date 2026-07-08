@@ -86,7 +86,7 @@ export function LawyerOnboardingPage() {
   }
 
   return (
-    <RegistrationShell title="律师入驻" description="提交执业资料后等待平台审核，通过后才能进入律师工作台。">
+    <RegistrationShell title="律师入驻" description="律师入驻需提交真实执业身份，审核通过后才能接收待办和处理文书。">
       <form className="space-y-4" onSubmit={handleSubmit}>
         <TextField label="姓名" value={name} onChange={setName} placeholder="赵律师" />
         <CodeFields phone={phone} code={code} setPhone={setPhone} setCode={setCode} requestCode={() => requestCode.mutate(phone)} disabled={phone.length < 6 || requestCode.isPending} />
@@ -199,11 +199,11 @@ function ConsentFields({ consent, setConsent }: { consent: ConsentState; setCons
       {consentItems.map((item) => (
         <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 shadow-sm" key={item.key}>
           <div className="flex flex-col gap-3">
-            <label className="flex min-w-0 items-start gap-3 font-semibold">
-              <input className="mt-0.5 size-5 shrink-0 rounded border-slate-300 accent-blue-600" type="checkbox" checked={consent[item.key]} onChange={(event) => setConsent({ ...consent, [item.key]: event.target.checked })} />
+            <label className="flex min-h-11 min-w-0 items-center gap-3 font-semibold">
+              <input className="size-6 shrink-0 rounded border-slate-300 accent-blue-600" type="checkbox" checked={consent[item.key]} onChange={(event) => setConsent({ ...consent, [item.key]: event.target.checked })} />
               <span className="leading-6">{item.label}</span>
             </label>
-            <Link className="inline-flex h-9 w-fit items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-3 text-xs font-black text-blue-700" to={item.to}>
+            <Link className="inline-flex h-11 w-fit items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-black text-blue-700" to={item.to}>
               {item.linkLabel}
               <ExternalLink size={13} />
             </Link>

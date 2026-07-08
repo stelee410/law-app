@@ -173,6 +173,15 @@ const assessedCase = {
   }
 };
 
+const missingEvidenceCase = {
+  ...assessedCase,
+  evidence: assessedCase.evidence.map((category) => ({
+    ...category,
+    status: 'pending',
+    files: []
+  }))
+};
+
 const lockedPlanCase = {
   ...assessedCase,
   selectedPlan: 'lawyer-review',
@@ -227,6 +236,12 @@ const lawyerDocument = {
 const pendingLawyerDocument = {
   ...lawyerDocument,
   status: 'pending_client_approval'
+};
+
+const archivedLawyerDocument = {
+  ...lawyerDocument,
+  status: 'archived',
+  title: 'Archived lawyer letter'
 };
 
 const testMessage = {
@@ -494,11 +509,12 @@ describe('App', () => {
     expect(await screen.findByRole('img', { name: '法灵 AI 品牌标识' })).toBeInTheDocument();
     expect(await screen.findByRole('img', { name: '法律服务安全协作插图' })).toBeInTheDocument();
     expect(await screen.findByText('律师入驻')).toBeInTheDocument();
+    expect(await screen.findByText('律师入驻需提交真实执业身份，审核通过后才能接收待办和处理文书。')).toBeInTheDocument();
 
     const termsLink = await screen.findByRole('link', { name: '查看服务协议' });
     const privacyLink = await screen.findByRole('link', { name: '查看隐私政策' });
-    expect(termsLink).toHaveClass('rounded-full');
-    expect(privacyLink).toHaveClass('rounded-full');
+    expect(termsLink).toHaveClass('h-11');
+    expect(privacyLink).toHaveClass('h-11');
   });
 
   it('opens registration legal links from explicit view actions', async () => {
@@ -563,6 +579,25 @@ describe('App', () => {
 
     expect(await screen.findByText('入驻未通过')).toBeInTheDocument();
     expect(await screen.findByText('执业证号无法核验')).toBeInTheDocument();
+  });
+
+  it('lets pending lawyers logout from review status', async () => {
+    const user = userEvent.setup();
+    useAuthStore.getState().setSession({
+      token: 'lawyer-pending-token',
+      user: pendingLawyer,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, pendingLawyer);
+    await router.navigate({ to: '/lawyer/review-status' });
+
+    render(<App />);
+
+    expect(await screen.findByText('入驻审核中')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: '退出登录' }));
+
+    await waitFor(() => expect(useAuthStore.getState().token).toBeNull());
+    await waitFor(() => expect(window.location.pathname).toBe('/login'));
   });
 
   it('renders admin navigation and user management actions', async () => {
@@ -687,6 +722,22 @@ describe('App', () => {
     expect(await screen.findByText('法灵平台保障')).toBeInTheDocument();
   });
 
+  it('shows missing required evidence before an assessment is treated as complete', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), missingEvidenceCase);
+    await router.navigate({ to: '/cases/$caseId/assessment', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('关键材料缺失，已生成初步评估')).toBeInTheDocument();
+    expect(screen.queryByText('证据已上传，AI评估完成')).not.toBeInTheDocument();
+  });
+
   it('renders service plan cards', async () => {
     useAuthStore.getState().setSession({
       token: 'test-token',
@@ -702,6 +753,29 @@ describe('App', () => {
     expect(await screen.findByText('选择案件闭环路径')).toBeInTheDocument();
     expect(await screen.findByText('律师复核包')).toBeInTheDocument();
     expect(await screen.findByText('选择此方案')).toBeInTheDocument();
+  });
+
+  it('confirms service plan selection before committing it', async () => {
+    const user = userEvent.setup();
+    const selectSpy = vi.spyOn(apiModule, 'selectCasePlan').mockResolvedValue({ ...assessedCase, selectedPlan: 'lawyer-review' });
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), assessedCase);
+    await router.navigate({ to: '/cases/$caseId/plans', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '选择此方案' }));
+    expect(selectSpy).not.toHaveBeenCalled();
+    expect(await screen.findByText('确认选择服务方案')).toBeInTheDocument();
+
+    await user.click(await screen.findByRole('button', { name: '确认选择' }));
+
+    await waitFor(() => expect(selectSpy).toHaveBeenCalledWith('case-test', 'lawyer-review'));
   });
 
   it('locks service plan buttons after a plan is selected', async () => {
@@ -825,6 +899,30 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: '保存文书' })).toBeDisabled();
     expect(await screen.findByRole('button', { name: '归档' })).toBeDisabled();
     expect(await screen.findByRole('button', { name: '提交用户' })).toBeDisabled();
+  });
+
+  it('renders archived lawyer documents as read-only with Chinese status', async () => {
+    useAuthStore.getState().setSession({
+      token: 'lawyer-token',
+      user: testLawyer,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testLawyer);
+    queryClient.setQueryData(caseKeys.lawyerDocuments('case-test'), [archivedLawyerDocument]);
+    await router.navigate({
+      to: '/lawyer/cases/$caseId/documents/$documentId',
+      params: { caseId: 'case-test', documentId: 'doc-lawyer-letter' }
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText('已归档')).toBeInTheDocument();
+    expect(await screen.findByLabelText('标题')).toBeDisabled();
+    expect(await screen.findByLabelText('收件人 / 对方当事人')).toBeDisabled();
+    expect(await screen.findByLabelText('请求事项 / 审查目标')).toBeDisabled();
+    expect(await screen.findByLabelText('履行期限 / 交付期限')).toBeDisabled();
+    expect(await screen.findByLabelText('正文')).toBeDisabled();
+    expect(await screen.findByRole('button', { name: '保存文书' })).toBeDisabled();
   });
 
   it('renders case progress quick actions', async () => {

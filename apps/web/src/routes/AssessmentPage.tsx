@@ -1,5 +1,5 @@
 import { Link, useParams } from '@tanstack/react-router';
-import { ArrowLeft, Bot, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bot, CheckCircle2 } from 'lucide-react';
 import { AssessmentSummary } from '../components/h5/AssessmentSummary';
 import { StateBlock } from '../components/StateBlock';
 import { useEvaluateCaseMutation, useCaseQuery } from '../hooks/useCaseQueries';
@@ -14,6 +14,10 @@ export function AssessmentPage() {
 
   if (!lawCase) return <StateBlock title="评估数据加载中" />;
   const catalog = getCaseCatalogItem(lawCase.caseType);
+  const missingRequiredEvidence = lawCase.evidence.filter((category) =>
+    category.required && category.files.length === 0 && category.status !== 'recognized'
+  );
+  const hasMissingRequiredEvidence = missingRequiredEvidence.length > 0;
 
   return (
     <div className="space-y-5">
@@ -53,9 +57,9 @@ export function AssessmentPage() {
 
       {assessment && (
         <>
-          <div className="flex items-center gap-2 rounded-lg bg-emerald-50 p-3 text-sm font-bold text-emerald-700">
-            <CheckCircle2 size={18} />
-            证据已上传，AI评估完成
+          <div className={`flex items-center gap-2 rounded-lg p-3 text-sm font-bold ${hasMissingRequiredEvidence ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+            {hasMissingRequiredEvidence ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
+            {hasMissingRequiredEvidence ? '关键材料缺失，已生成初步评估' : '证据已上传，AI评估完成'}
           </div>
           <AssessmentSummary assessment={assessment} caseId={caseId} />
         </>

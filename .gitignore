@@ -12,3 +12,8 @@ coverage
 uploads
 npm-debug.log*
 pnpm-debug.log*
+.claude
+.codex
+.codegraph
+.devin
+.tasks

@@ -230,6 +230,13 @@ def test_lawyer_review_document_closed_loop() -> None:
   assert approved_document.json()["document"]["status"] == "approved"
   assert approved_document.json()["case"]["status"] == "律师函已确认"
 
+  messages_after_approval = client.get("/api/v1/messages", headers=client_headers)
+  assert messages_after_approval.status_code == 200
+  assert any(
+    message["title"] == "文书已确认" and document["id"] in message["body"]
+    for message in messages_after_approval.json()["messages"]
+  )
+
   updated_approved_document = client.patch(
     f"/api/v1/lawyer/cases/{case_id}/documents/{document['id']}",
     headers=lawyer_headers,
@@ -251,6 +258,39 @@ def test_lawyer_review_document_closed_loop() -> None:
   )
   assert archived_document.status_code == 409
   assert archived_document.json()["detail"] == "INVALID_STATE"
+
+
+def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
+  client = TestClient(create_app(_test_settings()))
+  client_headers = _register_client(client, phone="13800001234")
+  case_id = _create_case(client, client_headers)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+
+  selected = client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "self-service"},
+  )
+  assert selected.status_code == 200
+  assert selected.json()["case"]["status"] == "AI方案处理中"
+
+  work_items = client.get(f"/api/v1/cases/{case_id}/work-items", headers=client_headers)
+  assert work_items.status_code == 200
+  ai_items = [item for item in work_items.json()["workItems"] if item["kind"] == "ai_guidance"]
+  assert len(ai_items) == 1
+  assert "补充" in ai_items[0]["summary"]
+  assert "草稿" in ai_items[0]["summary"]
+  assert "下一步" in ai_items[0]["summary"]
+
+  selected_again = client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "self-service"},
+  )
+  assert selected_again.status_code == 200
+  repeated_work_items = client.get(f"/api/v1/cases/{case_id}/work-items", headers=client_headers)
+  repeated_ai_items = [item for item in repeated_work_items.json()["workItems"] if item["kind"] == "ai_guidance"]
+  assert len(repeated_ai_items) == 1
 
 
 def test_lawyer_can_read_case_evidence_file(tmp_path: Path) -> None:

@@ -1,11 +1,21 @@
-import { Link } from '@tanstack/react-router';
-import { Clock3, XCircle } from 'lucide-react';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { Clock3, LogOut, XCircle } from 'lucide-react';
+import { queryClient } from '../lib/queryClient';
 import { useAuthStore } from '../state/authStore';
 
 export function LawyerReviewStatusPage() {
+  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
   const isRejected = user?.lawyerReviewStatus === 'rejected';
   const Icon = isRejected ? XCircle : Clock3;
+
+  async function handleLogout() {
+    logout();
+    queryClient.clear();
+    await navigate({ to: '/login', replace: true });
+  }
+
   return (
     <div className="flex flex-1 flex-col justify-center gap-5 py-10 text-center">
       <span className={`mx-auto grid size-16 place-items-center rounded-lg ${isRejected ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-700'}`}>
@@ -25,6 +35,10 @@ export function LawyerReviewStatusPage() {
       <Link className="mx-auto rounded-lg bg-slate-900 px-5 py-3 text-sm font-black text-white" to="/me">
         查看账号
       </Link>
+      <button className="mx-auto flex h-11 items-center justify-center gap-2 rounded-lg bg-red-50 px-5 text-sm font-black text-red-700" type="button" onClick={handleLogout}>
+        <LogOut size={17} />
+        退出登录
+      </button>
     </div>
   );
 }

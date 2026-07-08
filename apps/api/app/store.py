@@ -469,6 +469,14 @@ class InMemoryStore:
       f"用户已确认：{document.title}",
       {"documentId": document.id, "documentType": document.type},
     )
+    self._create_message(
+      law_case.userId or "",
+      "document",
+      "文书已确认",
+      f"已确认文书 {document.id}：{document.title}，案件将进入下一阶段。",
+      f"/cases/{case_id}",
+      case_id,
+    )
     self._notify_lawyers(
       "用户已确认文书",
       f"{law_case.debtorName} 已确认 {document.title}。",
@@ -767,13 +775,14 @@ class InMemoryStore:
 
   def _create_plan_follow_up(self, law_case: LawCase, user_id: str, plan_id: PlanId) -> None:
     if plan_id == "self-service":
-      task = _new_work_item(law_case.id, "ai_guidance", "AI自助任务", "根据 AI 评估继续补证、生成材料草稿并跟进进度。")
+      summary = _ai_guidance_summary(law_case)
+      task = _new_work_item(law_case.id, "ai_guidance", "AI自助任务", summary)
       self._work_items[task.id] = task
       self._create_message(
         user_id,
         "task",
         "AI自助流程已启动",
-        "系统将根据评估结果提示补证、生成材料草稿和下一步动作。",
+        summary,
         f"/cases/{law_case.id}",
         law_case.id,
       )
@@ -1351,6 +1360,17 @@ class PostgresStore:
             {"documentId": document.id, "documentType": document.type},
           ),
         )
+        self._insert_message(
+          cursor,
+          _new_message(
+            law_case.userId or "",
+            "document",
+            "文书已确认",
+            f"已确认文书 {document.id}：{document.title}，案件将进入下一阶段。",
+            f"/cases/{case_id}",
+            case_id,
+          ),
+        )
         self._notify_lawyers(
           cursor,
           "用户已确认文书",
@@ -1897,7 +1917,8 @@ class PostgresStore:
 
   def _create_plan_follow_up(self, cursor, law_case: LawCase, user_id: str, plan_id: PlanId) -> None:
     if plan_id == "self-service":
-      task = _new_work_item(law_case.id, "ai_guidance", "AI自助任务", "根据 AI 评估继续补证、生成材料草稿并跟进进度。")
+      summary = _ai_guidance_summary(law_case)
+      task = _new_work_item(law_case.id, "ai_guidance", "AI自助任务", summary)
       self._insert_work_item(cursor, task)
       self._insert_message(
         cursor,
@@ -1905,7 +1926,7 @@ class PostgresStore:
           user_id,
           "task",
           "AI自助流程已启动",
-          "系统将根据评估结果提示补证、生成材料草稿和下一步动作。",
+          summary,
           f"/cases/{law_case.id}",
           law_case.id,
         ),
@@ -2219,6 +2240,17 @@ def _new_work_item(
     createdAt=now,
     updatedAt=now,
   )
+
+
+def _ai_guidance_summary(law_case: LawCase) -> str:
+  missing_required = [
+    category.name
+    for category in law_case.evidence
+    if category.required and not category.files and category.status != "recognized"
+  ]
+  missing_text = "、".join(missing_required[:3]) if missing_required else "暂无缺失的必传材料"
+  route = law_case.assessment.suggestedRoute if law_case.assessment is not None else "补充材料后重新评估"
+  return f"下一步：补充{missing_text}；生成材料草稿；按“{route}”跟进进度。"
 
 
 def _new_document(case_id: str, lawyer_id: str, input_data: CreateDocumentInput) -> LegalDocument:
