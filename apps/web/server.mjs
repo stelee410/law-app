@@ -4,7 +4,9 @@ import { request } from 'node:http';
 import { createServer } from 'node:http';
 
 const port = Number(process.env.PORT || 8080);
-const root = join(process.cwd(), 'apps/web/dist');
+const root = existsSync(join(process.cwd(), 'dist'))
+  ? join(process.cwd(), 'dist')
+  : join(process.cwd(), 'apps/web/dist');
 const apiTarget = process.env.API_TARGET || 'http://api:4000';
 
 const contentTypes = {

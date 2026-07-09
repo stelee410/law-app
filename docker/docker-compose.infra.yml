@@ -1,0 +1,30 @@
+# law-app infrastructure: PostgreSQL only.
+# Run from the repository root:
+#   docker compose --env-file apps/api/.env -f docker/docker-compose.infra.yml up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: law-app-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-law_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-law_app}
+      POSTGRES_DB: ${POSTGRES_DB:-law_app}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-law_app} -d ${POSTGRES_DB:-law_app}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - law_app_net
+
+volumes:
+  pg_data:
+
+networks:
+  law_app_net:
+    name: law-app-net
