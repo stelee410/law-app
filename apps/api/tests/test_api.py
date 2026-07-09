@@ -452,6 +452,21 @@ def test_full_service_send_proof_requires_lawyer_confirmation_before_response() 
     headers=client_headers,
     json={"action": "submit_send_proof", "channel": "微信", "note": "客户已自行微信发送律师函并截图留存"},
   )
+  assert submitted_proof.status_code == 409
+  assert submitted_proof.json()["detail"] == "SEND_PROOF_REQUIRED"
+
+  uploaded_send_proof = client.post(
+    f"/api/v1/cases/{case_id}/evidence/send_proof",
+    headers=client_headers,
+    files={"file": ("send-proof.pdf", b"send proof bytes", "application/pdf")},
+  )
+  assert uploaded_send_proof.status_code == 200
+
+  submitted_proof = client.post(
+    f"/api/v1/cases/{case_id}/full-service/actions",
+    headers=client_headers,
+    json={"action": "submit_send_proof", "channel": "微信", "note": "客户已自行微信发送律师函并截图留存"},
+  )
   assert submitted_proof.status_code == 200
   proof_case = submitted_proof.json()["case"]
   proof_letter_stage = next(stage for stage in proof_case["stages"] if stage["key"] == "letter")
@@ -530,6 +545,20 @@ def test_full_service_lawyer_decision_controls_next_stage(
 ) -> None:
   client = TestClient(create_app(_test_settings()))
   client_headers, lawyer_headers, case_id, _document = _create_approved_lawyer_letter_case(client, plan_id="full-service")
+  premature_decision = client.post(
+    f"/api/v1/lawyer/cases/{case_id}/full-service/actions",
+    headers=lawyer_headers,
+    json={"action": "decide_response", "decision": "no_response", "note": "律师不能绕过客户回应记录"},
+  )
+  assert premature_decision.status_code == 409
+  assert premature_decision.json()["detail"] == "RESPONSE_REQUIRED"
+
+  uploaded_send_proof = client.post(
+    f"/api/v1/cases/{case_id}/evidence/send_proof",
+    headers=client_headers,
+    files={"file": ("send-proof.pdf", b"send proof bytes", "application/pdf")},
+  )
+  assert uploaded_send_proof.status_code == 200
   assert client.post(
     f"/api/v1/cases/{case_id}/full-service/actions",
     headers=client_headers,

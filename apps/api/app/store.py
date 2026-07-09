@@ -550,7 +550,11 @@ class InMemoryStore:
     _ensure_full_service_evidence_category(law_case)
     if not _has_approved_lawyer_letter(law_case, self._documents.values()):
       raise InvalidStateError("APPROVED_LAWYER_LETTER_REQUIRED")
-    _validate_full_service_client_action(input_data, _full_service_send_proof_confirmed(self._work_items.values(), case_id))
+    _validate_full_service_client_action(
+      input_data,
+      _full_service_send_proof_confirmed(self._work_items.values(), case_id),
+      _has_send_proof_file(law_case),
+    )
 
     completed_at = _format_datetime(_now())
     title, message, payload = _apply_full_service_client_action(law_case, input_data, completed_at)
@@ -1689,7 +1693,11 @@ class PostgresStore:
         if not self._has_approved_lawyer_letter(cursor, case_id):
           conn.rollback()
           raise InvalidStateError("APPROVED_LAWYER_LETTER_REQUIRED")
-        _validate_full_service_client_action(input_data, self._full_service_send_proof_confirmed(cursor, case_id))
+        _validate_full_service_client_action(
+          input_data,
+          self._full_service_send_proof_confirmed(cursor, case_id),
+          _has_send_proof_file(law_case),
+        )
 
         completed_at = _format_datetime(_now())
         title, message, payload = _apply_full_service_client_action(law_case, input_data, completed_at)
@@ -2788,6 +2796,10 @@ def _ensure_full_service_evidence_category(law_case: LawCase) -> None:
   )
 
 
+def _has_send_proof_file(law_case: LawCase) -> bool:
+  return any(category.id == "send_proof" and bool(category.files) for category in law_case.evidence)
+
+
 def _new_case(user_id: str, input_data: CreateCaseInput) -> LawCase:
   created_at = _now()
   case_type = normalize_case_type(input_data.caseType)
@@ -3086,9 +3098,13 @@ def _apply_lawyer_service_action(law_case: LawCase, input_data: LawyerServiceAct
   return "律师服务动作已记录", input_data.note or "客户已记录律师服务后续动作。", payload
 
 
-def _validate_full_service_client_action(input_data: FullServiceActionInput, send_proof_confirmed: bool) -> None:
+def _validate_full_service_client_action(
+  input_data: FullServiceActionInput,
+  send_proof_confirmed: bool,
+  has_send_proof_file: bool,
+) -> None:
   if input_data.action == "submit_send_proof":
-    if not ((input_data.channel or "").strip() or (input_data.note or "").strip()):
+    if not has_send_proof_file or not ((input_data.channel or "").strip() or (input_data.note or "").strip()):
       raise InvalidStateError("SEND_PROOF_REQUIRED")
   if input_data.action == "record_response":
     if input_data.response is None:
@@ -3102,15 +3118,23 @@ def _validate_full_service_lawyer_action(
   work_items: Iterable[WorkItem],
   case_id: str,
 ) -> None:
+  case_work_items = [item for item in work_items if item.caseId == case_id]
   if input_data.action in ("confirm_send_proof", "reject_send_proof"):
     has_pending_proof = any(
-      item.caseId == case_id and item.kind == "send_proof_review" and item.status in ("pending", "in_progress")
-      for item in work_items
+      item.kind == "send_proof_review" and item.status in ("pending", "in_progress")
+      for item in case_work_items
     )
     if not has_pending_proof:
       raise InvalidStateError("SEND_PROOF_REQUIRED")
-  if input_data.action == "decide_response" and input_data.decision is None:
-    raise InvalidStateError("DECISION_REQUIRED")
+  if input_data.action in ("decide_response", "prepare_filing", "close_case"):
+    if input_data.action == "decide_response" and input_data.decision is None:
+      raise InvalidStateError("DECISION_REQUIRED")
+    has_pending_follow_up = any(
+      item.kind == "lawyer_follow_up" and item.status in ("pending", "in_progress")
+      for item in case_work_items
+    )
+    if not has_pending_follow_up:
+      raise InvalidStateError("RESPONSE_REQUIRED")
 
 
 def _apply_full_service_client_action(law_case: LawCase, input_data: FullServiceActionInput, completed_at: str) -> tuple[str, str, dict[str, Any]]:
