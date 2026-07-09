@@ -62,25 +62,79 @@ scp docker/prod.env.example ecs-user@8.210.32.131:/opt/law-app/.env
 ssh ecs-user@8.210.32.131 'nano /opt/law-app/.env'
 ```
 
-必须替换：
+### 3. 生产 `.env` 填写清单
 
-- `JWT_SECRET_KEY`
-- `POSTGRES_PASSWORD`
-- `ADMIN_PHONE` / `ADMIN_NAME`，如果需要启动时 bootstrap 初始管理员
+`docker/prod.env.example` 要复制成 ECS 上的 `/opt/law-app/.env` 后再改。当前部署目标是 `8.210.32.131`，先按单入口运行：公网访问 `http://8.210.32.131/`，nginx 反代 `/api/` 到 API 容器。
 
-域名未定时可暂保留：
+必须改掉的值：
 
-```env
-ALLOWED_ORIGINS=["*"]
-VITE_API_BASE_URL=/api/v1
-WEB_PORT=80
-```
+| 变量 | 是否必须修改 | 建议填写 | 说明 |
+| --- | --- | --- | --- |
+| `JWT_SECRET_KEY` | 必须 | 一段足够长的随机密钥 | 用于签发登录 token，不能使用 `replace-with-a-long-random-secret`。 |
+| `POSTGRES_PASSWORD` | 必须 | PostgreSQL 强密码 | API 和 PostgreSQL 容器共用这个密码。首次初始化数据卷后不要随便改，否则已有数据库用户密码不会自动同步。 |
 
-域名确定后再改为真实来源，例如：
+管理员初始化按需启用：
+
+| 变量 | 是否必须修改 | 建议填写 | 说明 |
+| --- | --- | --- | --- |
+| `ADMIN_PHONE` | 可选 | 管理员手机号 | 如果要启动时自动创建初始管理员，和 `ADMIN_NAME`、`ADMIN_PASSWORD` 一起填写；不启用就留空。 |
+| `ADMIN_NAME` | 可选 | 管理员姓名 | 只在 `ADMIN_PHONE` 同时存在时生效。 |
+| `ADMIN_PASSWORD` | 启用管理员时必须 | 管理员强密码 | 启用管理员时必须替换 `replace-with-a-strong-admin-password`；不启用管理员时建议留空。 |
+
+当前 ECS/IP 单入口可以保持默认：
+
+| 变量 | 建议填写 | 说明 |
+| --- | --- | --- |
+| `APP_ENV` | `production` | 生产环境标识。 |
+| `PROJECT_NAME` | `law-app` | health 接口里的服务名。 |
+| `VERSION` | `0.1.0` | 当前应用版本号。 |
+| `DEBUG` | `false` | 生产保持关闭。 |
+| `API_V1_STR` | `/api/v1` | API 路由前缀，nginx 当前也按这个路径转发。 |
+| `ALLOWED_ORIGINS` | `["*"]` | 域名未定时可暂时保留；域名确定后再收窄。 |
+| `STORAGE_BACKEND` | `postgres` | 生产必须使用 PostgreSQL。 |
+| `UPLOAD_DIR` | `/app/uploads` | API 容器内上传目录，不要改成宿主机路径。 |
+| `UPLOADS_DIR` | `./uploads` | ECS 上 `/opt/law-app/uploads`，由 compose 挂载到容器内 `/app/uploads`。 |
+| `POSTGRES_HOST` | `postgres` | Docker 网络里的 PostgreSQL 服务名，不要写 `localhost`、ECS IP 或公网 IP。 |
+| `POSTGRES_DB` | `law_app` | 数据库名。 |
+| `POSTGRES_USER` | `law_app` | 数据库用户名。 |
+| `POSTGRES_PORT` | `5432` | 容器网络内 PostgreSQL 端口，不是公网映射端口。生产 infra compose 默认不暴露公网 5432。 |
+| `POSTGRES_POOL_SIZE` | `5` | API 连接池基础连接数。 |
+| `POSTGRES_MAX_OVERFLOW` | `10` | API 连接池额外连接数。 |
+| `WEB_PORT` | `80` | ECS 对外 Web 端口；如果 80 被占用再改。 |
+| `LAW_APP_TAG` | `latest` | 默认运行最新镜像；回滚时才改成旧的 git 短 SHA。 |
+| `VITE_API_BASE_URL` | `/api/v1` | 前端构建期 API 基础路径；当前同源入口保持默认即可。 |
+| `LOG_LEVEL` | `INFO` | 生产日志级别。 |
+| `LOG_FORMAT` | `console` | 当前容器日志格式。 |
+
+AI 和观测配置可以先留空：
+
+| 变量 | 是否必须修改 | 说明 |
+| --- | --- | --- |
+| `OPENAI_API_BASE` | 可选 | 接入大模型时填写，例如兼容 OpenAI 的 API base。 |
+| `OPENAI_API_KEY` | 可选 | 接入大模型时填写。 |
+| `DEFAULT_LLM_MODEL` | 可选 | 接入大模型时填写默认模型名。 |
+| `DEFAULT_LLM_TEMPERATURE` | 可保留 `0.7` | 默认生成温度。 |
+| `LANGFUSE_PUBLIC_KEY` | 可选 | 接入 Langfuse 时填写。 |
+| `LANGFUSE_SECRET_KEY` | 可选 | 接入 Langfuse 时填写。 |
+| `LANGFUSE_HOST` | 可选 | 接入 Langfuse 时填写。 |
+
+一般不需要改：
+
+| 变量 | 建议填写 | 说明 |
+| --- | --- | --- |
+| `MOCK_OTP_CODE` | `123456` | 当前本地 mock OTP 码。对公网开放前应确认是否仍允许固定验证码。 |
+| `OTP_EXPIRE_MINUTES` | `5` | 验证码过期时间。 |
+| `TOKEN_EXPIRE_DAYS` | `30` | 登录 token 有效期。 |
+| `JWT_ALGORITHM` | `HS256` | JWT 算法，和代码默认一致。 |
+| `JWT_ACCESS_TOKEN_EXPIRE_DAYS` | `30` | 显式覆盖 token 有效期；和 `TOKEN_EXPIRE_DAYS` 保持一致即可。 |
+
+域名确定后再把 `ALLOWED_ORIGINS` 改为真实来源，例如：
 
 ```env
 ALLOWED_ORIGINS=["https://h5.example.com","https://api.example.com"]
 ```
+
+如果未来不再使用 `/api/v1` 作为前端请求路径，除了修改 `.env` 中的 `VITE_API_BASE_URL`，还要在构建 VM 执行部署脚本时同步传入同名构建期变量，例如 `VITE_API_BASE_URL=/new-api ./docker/deploy.sh`。当前同源入口不需要改。
 
 ## 二、日常部署
 
