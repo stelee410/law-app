@@ -2,17 +2,22 @@
   "name": "law-ai-app",
   "private": true,
   "version": "0.1.0",
-  "description": "Full-stack AI legal debt recovery app prototype",
-  "workspaces": [
-    "apps/*"
-  ],
+  "description": "Mobile H5 legal case workflow scaffold",
+  "packageManager": "pnpm@9.15.4",
   "scripts": {
-    "dev": "concurrently \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
-    "build": "npm run build -w apps/api && npm run build -w apps/web",
-    "test": "npm run test -w apps/api && npm run test -w apps/web",
-    "lint": "npm run lint -w apps/web",
-    "docker:up": "docker compose up --build",
-    "docker:down": "docker compose down --remove-orphans"
+    "dev": "concurrently \"uv run --directory apps/api --project . uvicorn app.main:app --reload --host 0.0.0.0 --port 4000\" \"pnpm --dir apps/web dev\"",
+    "dev:api": "uv run --directory apps/api --project . uvicorn app.main:app --reload --host 0.0.0.0 --port 4000",
+    "dev:web": "pnpm --dir apps/web dev",
+    "build": "pnpm --dir apps/web build",
+    "test": "uv run --directory apps/api --project . pytest && pnpm --dir apps/web test",
+    "test:api": "uv run --directory apps/api --project . pytest",
+    "test:web": "pnpm --dir apps/web test",
+    "lint": "pnpm --dir apps/web lint",
+    "typecheck": "pnpm --dir apps/web typecheck",
+    "docker:up": "docker compose --env-file apps/api/.env -f docker/docker-compose.yml up --build",
+    "docker:down": "docker compose --env-file apps/api/.env -f docker/docker-compose.yml down --remove-orphans",
+    "docker:infra:up": "docker compose --env-file apps/api/.env -f docker/docker-compose.infra.yml up -d",
+    "docker:infra:down": "docker compose --env-file apps/api/.env -f docker/docker-compose.infra.yml down"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
