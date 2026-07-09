@@ -16,10 +16,15 @@ from app.schemas import (
   ClientRegisterInput,
   CreateCaseInput,
   CreateDocumentInput,
+  FullServiceActionInput,
+  LawyerFullServiceActionInput,
+  LawyerServiceActionInput,
   LawyerOnboardingInput,
   LoginInput,
+  PasswordLoginInput,
   RequestCodeInput,
   SelectPlanInput,
+  SelfServiceActionInput,
   SubmitReviewInput,
   UpdateDocumentInput,
   User,
@@ -108,6 +113,20 @@ def login(
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_DISABLED") from exc
   if session is None:
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="INVALID_CODE")
+  return session
+
+
+@router.post("/auth/login/password")
+def login_password(
+  payload: PasswordLoginInput,
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    session = auth_service.login_with_password(store, payload.phone, payload.password)
+  except AccountDisabledError as exc:
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_DISABLED") from exc
+  if session is None:
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="INVALID_CREDENTIALS")
   return session
 
 
@@ -382,6 +401,54 @@ def select_plan(
   return {"case": law_case}
 
 
+@router.post("/cases/{case_id}/self-service/actions")
+def record_self_service_action(
+  case_id: str,
+  payload: SelfServiceActionInput,
+  current_user: Annotated[User, Depends(_get_current_user)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    law_case = cases_service.record_self_service_action(store, current_user.id, case_id, payload)
+  except InvalidStateError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+  if law_case is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
+  return {"case": law_case}
+
+
+@router.post("/cases/{case_id}/lawyer-service/actions")
+def record_lawyer_service_action(
+  case_id: str,
+  payload: LawyerServiceActionInput,
+  current_user: Annotated[User, Depends(_get_current_user)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    law_case = cases_service.record_lawyer_service_action(store, current_user.id, case_id, payload)
+  except InvalidStateError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+  if law_case is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
+  return {"case": law_case}
+
+
+@router.post("/cases/{case_id}/full-service/actions")
+def record_full_service_action(
+  case_id: str,
+  payload: FullServiceActionInput,
+  current_user: Annotated[User, Depends(_get_current_user)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    law_case = cases_service.record_full_service_action(store, current_user.id, case_id, payload)
+  except InvalidStateError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+  if law_case is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
+  return {"case": law_case}
+
+
 @router.get("/lawyer/tasks")
 def lawyer_tasks(
   current_lawyer: Annotated[User, Depends(_get_current_lawyer)],
@@ -416,6 +483,22 @@ def submit_lawyer_review(
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="TASK_NOT_FOUND")
   law_case, work_item, review = result
   return {"case": law_case, "workItem": work_item, "review": review}
+
+
+@router.post("/lawyer/cases/{case_id}/full-service/actions")
+def record_lawyer_full_service_action(
+  case_id: str,
+  payload: LawyerFullServiceActionInput,
+  current_lawyer: Annotated[User, Depends(_get_current_lawyer)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    law_case = cases_service.record_lawyer_full_service_action(store, current_lawyer.id, case_id, payload)
+  except InvalidStateError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+  if law_case is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
+  return {"case": law_case}
 
 
 @router.post("/lawyer/cases/{case_id}/documents", status_code=status.HTTP_201_CREATED)

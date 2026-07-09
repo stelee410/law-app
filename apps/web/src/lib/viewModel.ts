@@ -121,8 +121,29 @@ export function deriveMessages(cases: LawCase[]): H5Message[] {
 }
 
 export function deriveLatestProgress(lawCase: LawCase, events: CaseEvent[] = []) {
-  const latestEvent = events[0];
   const activeStage = lawCase.stages.find((stage) => stage.status === 'active') ?? lawCase.stages.at(-1);
+  const selfServiceStage = lawCase.selectedPlan === 'self-service' ? lawCase.stages.find((stage) => stage.key === 'letter') : null;
+  const latestEvent = lawCase.selectedPlan === 'self-service'
+    ? events.find((event) => event.type !== 'stage.changed' || event.title !== '发送律师函')
+    : events[0];
+
+  if (lawCase.selectedPlan === 'self-service' && lawCase.status === '已完成自助处理') {
+    return {
+      title: '自助处理已完成',
+      body: '已记录回款、履行或结案结果；建议继续保存付款凭证、沟通记录和履行材料。',
+      time: activeStage?.at ?? formatDate(lawCase.createdAt),
+      href: `/cases/${lawCase.id}#self-service-actions`
+    };
+  }
+
+  if (selfServiceStage && selfServiceStage.status === 'active') {
+    return {
+      title: selfServiceStage.title,
+      body: selfServiceActiveBody(lawCase),
+      time: selfServiceStage.at ?? formatDate(lawCase.createdAt),
+      href: `/cases/${lawCase.id}`
+    };
+  }
 
   if (latestEvent) {
     return {
@@ -148,6 +169,13 @@ export function deriveLatestProgress(lawCase: LawCase, events: CaseEvent[] = [])
     time: formatDate(lawCase.createdAt),
     href: `/cases/${lawCase.id}/evidence`
   };
+}
+
+function selfServiceActiveBody(lawCase: LawCase) {
+  if (lawCase.caseType === 'debt_collection') {
+    return '请先复制或下载付款催告函模板，自行发送/使用后记录凭证和对方回应。';
+  }
+  return '请先复制或下载 AI 自助模板，按当前业务场景核对后使用，并记录凭证和对方回应。';
 }
 
 function deriveTodayProgress(cases: LawCase[]): DashboardView['todayProgress'] {

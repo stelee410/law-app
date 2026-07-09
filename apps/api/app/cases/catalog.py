@@ -49,6 +49,7 @@ EVIDENCE_TEMPLATES: dict[CaseType, list[EvidenceTemplate]] = {
     EvidenceTemplate("transfer", "转账记录", True, "证明付款与欠款金额"),
     EvidenceTemplate("invoice", "发票/对账单", False, "补充金额依据"),
     EvidenceTemplate("delivery", "交付证明", False, "证明已履行义务"),
+    EvidenceTemplate("send_proof", "发送/送达凭证", False, "留存律师函自行发送、快递单或签收记录"),
     EvidenceTemplate("other", "其他证据", False, "选填项"),
   ],
   "lawyer_letter": [
@@ -57,6 +58,7 @@ EVIDENCE_TEMPLATES: dict[CaseType, list[EvidenceTemplate]] = {
     EvidenceTemplate("contract", "合同/协议", False, "补充权利义务依据"),
     EvidenceTemplate("communication", "沟通记录", True, "证明已沟通或催告"),
     EvidenceTemplate("demand", "诉求材料", True, "明确履行期限与请求"),
+    EvidenceTemplate("send_proof", "发送/送达凭证", False, "留存函件发送截图、快递单或签收记录"),
     EvidenceTemplate("other", "其他证据", False, "选填项"),
   ],
   "labor_dispute": [
@@ -66,6 +68,7 @@ EVIDENCE_TEMPLATES: dict[CaseType, list[EvidenceTemplate]] = {
     EvidenceTemplate("termination", "解除/离职通知", False, "证明争议时间"),
     EvidenceTemplate("communication", "聊天记录", True, "证明管理关系与争议经过"),
     EvidenceTemplate("social_security", "社保记录", False, "补充劳动关系证据"),
+    EvidenceTemplate("send_proof", "发送/送达凭证", False, "留存沟通函件、调解通知或仲裁材料发送凭证"),
   ],
   "rental_dispute": [
     EvidenceTemplate("lease_contract", "租赁合同", True, "确认租期、租金与押金"),
@@ -73,6 +76,7 @@ EVIDENCE_TEMPLATES: dict[CaseType, list[EvidenceTemplate]] = {
     EvidenceTemplate("handover", "交接记录", False, "证明交付和退租状态"),
     EvidenceTemplate("property_media", "房屋照片/视频", False, "证明损坏或占用情况"),
     EvidenceTemplate("communication", "沟通记录", True, "证明协商与催告经过"),
+    EvidenceTemplate("send_proof", "发送/送达凭证", False, "留存协商函、律师函或快递签收凭证"),
     EvidenceTemplate("other", "其他证据", False, "选填项"),
   ],
   "contract_review": [

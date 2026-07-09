@@ -151,9 +151,12 @@ def generate_self_service_document_body(
         "role": "system",
         "content": (
           "You are a Chinese legal document drafting assistant. Improve the provided "
-          "draft while keeping its section structure, facts, amounts, and compliance "
-          "notices unchanged in meaning. Return strict JSON only with a single key "
-          '"body" containing the improved document text in Chinese.'
+          "draft for readability only. Preserve every section heading, every quoted "
+          "law name and article number, every legal-basis paragraph, the 399 self-service "
+          "boundary notice, and the AI-generated notice exactly. Do not add, remove, "
+          "replace, or reorder legal articles. Do not introduce terms from another case "
+          "type, such as payment-demand wording in non-debt documents. Return strict "
+          'JSON only with a single key "body" containing the improved document text in Chinese.'
         ),
       },
       {

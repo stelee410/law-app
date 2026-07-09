@@ -24,7 +24,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
   resolved_settings = settings or Settings()
   store, database = create_store(resolved_settings)
   if resolved_settings.ADMIN_PHONE and resolved_settings.ADMIN_NAME:
-    store.create_admin(resolved_settings.ADMIN_PHONE, resolved_settings.ADMIN_NAME)
+    admin_password = resolved_settings.ADMIN_PASSWORD.get_secret_value() if resolved_settings.ADMIN_PASSWORD else None
+    store.create_admin(resolved_settings.ADMIN_PHONE, resolved_settings.ADMIN_NAME, admin_password)
 
   @asynccontextmanager
   async def lifespan(app: FastAPI) -> AsyncIterator[None]:

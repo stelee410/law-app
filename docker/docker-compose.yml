@@ -19,6 +19,9 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       JWT_ACCESS_TOKEN_EXPIRE_DAYS: ${JWT_ACCESS_TOKEN_EXPIRE_DAYS:-30}
+      ADMIN_PHONE: ${ADMIN_PHONE:-}
+      ADMIN_NAME: ${ADMIN_NAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-law_app}
       POSTGRES_USER: ${POSTGRES_USER:-law_app}
@@ -38,7 +41,7 @@ services:
     volumes:
       - ../uploads:/app/uploads
     ports:
-      - "4000:4000"
+      - "${API_HOST_PORT:-14000}:4000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/api/v1/health')"]
       interval: 10s
@@ -58,7 +61,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "8080:80"
+      - "${WEB_HOST_PORT:-18080}:80"
     networks:
       - law_app_net
 

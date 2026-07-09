@@ -5,16 +5,21 @@ import type { ServicePlan } from '../../lib/types';
 export function PlanCard({
   plan,
   selected,
+  active,
   locked,
   pending,
   onSelect
 }: {
   plan: ServicePlan;
   selected: boolean;
+  active: boolean;
   locked: boolean;
   pending: boolean;
   onSelect: () => void;
 }) {
+  const actionLabel = `${selected ? '已选择' : '选择'}${plan.name} ${plan.price}元`;
+  const primaryAction = selected || active || plan.recommended;
+
   return (
     <article className={`relative rounded-lg border bg-white p-4 shadow-sm ${plan.recommended ? 'border-blue-500' : 'border-slate-100'}`}>
       {plan.recommended && (
@@ -39,9 +44,10 @@ export function PlanCard({
       </div>
       <button
         className={`mt-4 h-12 w-full rounded-lg font-black shadow-sm ${
-          selected ? 'bg-emerald-100 text-emerald-700' : plan.recommended ? 'bg-blue-600 text-white shadow-blue-100' : 'bg-slate-100 text-slate-800'
+          primaryAction ? 'bg-blue-600 text-white shadow-blue-100' : 'bg-slate-100 text-slate-800'
         } disabled:opacity-50`}
         type="button"
+        aria-label={actionLabel}
         disabled={pending || locked}
         onClick={onSelect}
       >

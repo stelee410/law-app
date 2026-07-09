@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -169,6 +169,14 @@ const assessedCase = {
     findings: ['合同与转账记录可形成基础证据链。'],
     plans: [
       {
+        id: 'self-service',
+        name: 'AI自助版',
+        subtitle: '适合预算有限 / 自主操作',
+        price: 399,
+        fee: '一次性服务费',
+        features: ['AI自助材料包', '复制或下载模板，自行发送/使用', '记录结果']
+      },
+      {
         id: 'lawyer-review',
         name: '律师复核包',
         subtitle: '平衡效率和专业度',
@@ -176,6 +184,14 @@ const assessedCase = {
         fee: '固定费 + 成功费 5%',
         features: ['律师复核证据', '发函催告'],
         recommended: true
+      },
+      {
+        id: 'full-service',
+        name: '诉前全程跟进版',
+        subtitle: '律师跟进发送凭证、对方回应和下一步诉前动作',
+        price: 5999,
+        fee: '固定费 + 成功费 10%',
+        features: ['律师签章定稿文书', '客户自行发送后上传凭证', '律师确认凭证并跟进回应']
       }
     ]
   }
@@ -193,18 +209,56 @@ const missingEvidenceCase = {
 const lockedPlanCase = {
   ...assessedCase,
   selectedPlan: 'lawyer-review',
+  stages: [
+    {
+      key: 'submit',
+      title: '提交案件',
+      description: '案件信息已提交。',
+      status: 'done',
+      at: '2026-06-01'
+    },
+    {
+      key: 'evidence',
+      title: '证据收集',
+      description: '已上传关键证据。',
+      status: 'done',
+      at: '2026-06-02'
+    },
+    {
+      key: 'review',
+      title: '律师复核',
+      description: '律师复核中',
+      status: 'active'
+    },
+    {
+      key: 'letter',
+      title: '发送律师函',
+      description: '生成并发送律师函',
+      status: 'todo'
+    },
+    {
+      key: 'negotiation',
+      title: '协商调解',
+      description: '跟进对方回应',
+      status: 'todo'
+    },
+    {
+      key: 'filing',
+      title: '立案材料准备',
+      description: '调解未果将进入立案准备阶段',
+      status: 'todo'
+    },
+    {
+      key: 'recovery',
+      title: '回款 / 结案',
+      description: '回款完成或法院判决后结案',
+      status: 'todo'
+    }
+  ],
   assessment: {
     ...assessedCase.assessment,
     plans: [
-      ...assessedCase.assessment.plans,
-      {
-        id: 'self-service',
-        name: 'AI 自助包',
-        subtitle: '轻量自动引导',
-        price: 299,
-        fee: '固定费',
-        features: ['AI 补证提示', '材料草稿生成']
-      }
+      ...assessedCase.assessment.plans
     ]
   }
 };
@@ -246,6 +300,134 @@ const pendingLawyerDocument = {
   status: 'pending_client_approval'
 };
 
+const approvedLawyerServiceDocument = {
+  ...lawyerDocument,
+  status: 'approved',
+  title: '正式催款律师函',
+  body: '请贵司收到本函后三日内支付全部欠款及逾期损失。'
+};
+
+const approvedLawyerServiceCase = {
+  ...assessedCase,
+  selectedPlan: 'lawyer-review',
+  status: '律师函已定稿，待客户自行发送',
+  stages: [
+    {
+      key: 'submit',
+      title: '提交案件',
+      description: '案件信息已提交。',
+      status: 'done',
+      at: '2026-06-01'
+    },
+    {
+      key: 'evidence',
+      title: '证据收集',
+      description: '已上传关键证据。',
+      status: 'done',
+      at: '2026-06-02'
+    },
+    {
+      key: 'review',
+      title: '律师复核',
+      description: '律师已提交复核意见',
+      status: 'done',
+      at: '2026-06-03'
+    },
+    {
+      key: 'letter',
+      title: '发送律师函',
+      description: '律师函已定稿，待客户下载或复制后自行发送',
+      status: 'active'
+    },
+    {
+      key: 'negotiation',
+      title: '协商跟进',
+      description: '客户自行发送后记录对方回应',
+      status: 'todo'
+    },
+    {
+      key: 'filing',
+      title: '立案材料准备',
+      description: '对方无回应或拒绝后准备立案材料',
+      status: 'todo'
+    },
+    {
+      key: 'recovery',
+      title: '回款 / 结案',
+      description: '回款完成或法院判决后结案',
+      status: 'todo'
+    }
+  ]
+};
+
+const approvedFullServiceCase = {
+  ...approvedLawyerServiceCase,
+  selectedPlan: 'full-service',
+  stages: approvedLawyerServiceCase.stages.map((stage) => {
+    if (stage.key === 'letter') {
+      return {
+        ...stage,
+        description: '律师函已定稿，待客户自行发送并提交发送凭证',
+        status: 'active'
+      };
+    }
+    if (stage.key === 'negotiation') {
+      return {
+        ...stage,
+        description: '律师确认发送凭证后进入对方回应阶段',
+        status: 'todo'
+      };
+    }
+    return stage;
+  })
+};
+
+const pendingSendProofTask = {
+  id: 'task-send-proof',
+  caseId: 'case-test',
+  kind: 'send_proof_review',
+  status: 'pending',
+  assigneeId: 'lawyer-test',
+  title: '发送凭证确认待办',
+  summary: '确认测试债务人有限公司律师函发送凭证。客户记录：已提交微信发送截图。',
+  dueAt: '2026-06-30T00:00:00.000Z',
+  createdAt: '2026-06-29T00:00:00.000Z',
+  updatedAt: '2026-06-29T00:00:00.000Z'
+};
+
+const pendingFollowUpTask = {
+  id: 'task-follow-up',
+  caseId: 'case-test',
+  kind: 'lawyer_follow_up',
+  status: 'pending',
+  assigneeId: 'lawyer-test',
+  title: '对方回应处理待办',
+  summary: '处理测试债务人有限公司律师函发送后的对方回应（no_response）。客户记录：七日内未回复。',
+  dueAt: '2026-06-30T00:00:00.000Z',
+  createdAt: '2026-06-29T00:00:00.000Z',
+  updatedAt: '2026-06-29T00:00:00.000Z'
+};
+
+const sendProofPendingCase = {
+  ...approvedFullServiceCase,
+  status: '发送凭证待律师确认',
+  stages: approvedFullServiceCase.stages.map((stage) =>
+    stage.key === 'letter'
+      ? { ...stage, description: '客户已提交发送凭证，待律师确认后进入对方回应阶段', status: 'active' }
+      : stage
+  )
+};
+
+const sendProofConfirmedCase = {
+  ...approvedFullServiceCase,
+  status: '发送凭证已确认，等待对方回应',
+  stages: approvedFullServiceCase.stages.map((stage) => {
+    if (stage.key === 'letter') return { ...stage, status: 'done', at: '2026-06-04' };
+    if (stage.key === 'negotiation') return { ...stage, description: '等待对方回应，客户可记录付款、承诺、拒绝或无回应', status: 'active' };
+    return stage;
+  })
+};
+
 const archivedLawyerDocument = {
   ...lawyerDocument,
   status: 'archived',
@@ -255,7 +437,7 @@ const archivedLawyerDocument = {
 const selfServiceCase = {
   ...assessedCase,
   selectedPlan: 'self-service',
-  status: 'AI自助处理完成：已生成催收函草稿与追偿行动建议',
+  status: 'AI自助处理完成：已生成催告模板与自助追偿清单',
   stages: [
     {
       key: 'submit',
@@ -280,18 +462,92 @@ const selfServiceCase = {
     },
     {
       key: 'letter',
-      title: '发送律师函',
-      description: 'AI已生成催收函草稿，可参考草稿发送催告',
-      status: 'done',
-      at: '2026-06-03'
+      title: 'AI自助处理包',
+      description: '复制或下载模板，自行发送后记录送达凭证与对方回应',
+      status: 'active'
     },
     {
       key: 'negotiation',
       title: '协商调解',
-      description: '跟进对方回应，保留送达、沟通和履行记录',
-      status: 'active'
+      description: '记录对方回应后进入下一步建议',
+      status: 'todo'
     }
   ]
+};
+
+const nonDebtSelfServiceStages = selfServiceCase.stages.map((stage) => {
+  if (stage.key === 'review') {
+    return {
+      ...stage,
+      description: 'AI已生成对应类型的自助处理包'
+    };
+  }
+  if (stage.key === 'letter') {
+    return {
+      ...stage,
+      description: '复制或下载模板，自行使用后记录凭证与对方回应'
+    };
+  }
+  return stage;
+});
+
+const selfServiceEscalationCase = {
+  ...selfServiceCase,
+  status: '建议准备材料或升级人工服务',
+  stages: [
+    ...selfServiceCase.stages.slice(0, 4).map((stage) =>
+      stage.key === 'letter'
+        ? {
+            ...stage,
+            status: 'done',
+            description: 'AI自助处理包已使用并记录结果',
+            at: '2026-06-04'
+          }
+        : stage
+    ),
+    {
+      key: 'negotiation',
+      title: '协商调解',
+      description: '等待对方回应，继续保留送达、沟通和履行记录',
+      status: 'active'
+    },
+    {
+      key: 'filing',
+      title: '立案材料准备',
+      description: '可整理材料包，或升级人工复核/代办服务',
+      status: 'active'
+    },
+    {
+      key: 'recovery',
+      title: '回款 / 结案',
+      description: '回款完成或法院判决后结案',
+      status: 'todo'
+    }
+  ]
+};
+
+const selfServiceUpgradedCase = {
+  ...selfServiceEscalationCase,
+  status: '已申请升级人工服务',
+  stages: selfServiceEscalationCase.stages.map((stage) => {
+    if (stage.key === 'filing') {
+      return {
+        ...stage,
+        status: 'done',
+        description: '已申请升级人工服务，399 自助处理已交接',
+        at: '2026-06-05'
+      };
+    }
+    if (stage.key === 'negotiation') {
+      return {
+        ...stage,
+        status: 'done',
+        description: '已记录对方拒绝、无回应或需人工复核',
+        at: '2026-06-05'
+      };
+    }
+    return stage;
+  })
 };
 
 const selfServiceWorkItems = [
@@ -299,9 +555,9 @@ const selfServiceWorkItems = [
     id: 'task-ai-guidance',
     caseId: 'case-test',
     kind: 'ai_guidance',
-    status: 'completed',
-    title: 'AI自助任务',
-    summary: '已生成《致测试债务人有限公司的催收函（AI草稿）》；下一步：查看催收函草稿。'
+    status: 'in_progress',
+    title: 'AI自助处理包',
+    summary: '已生成《付款催告函（AI 自助模板）》；下一步：复制或下载付款催告函模板，自行发送/使用后记录送达凭证与对方回应。'
   },
   {
     id: 'task-ai-pending',
@@ -318,18 +574,190 @@ const selfServiceDocument = {
   caseId: 'case-test',
   type: 'lawyer_letter',
   status: 'approved',
-  title: '致测试债务人有限公司的催收函（AI草稿）',
+  title: '付款催告函（AI 自助模板）',
   fields: {
     source: 'ai_self_service',
     generatedAt: '2026-06-03T00:00:00.000Z'
   },
-  body: '一、案件信息\n二、AI 处理建议\n本文书由人工智能（AI）生成，供参考使用。',
+  body: '付款催告函（AI 自助模板）\n\n一、发函主体与相对方\n发函主体：测试用户\n相对方：测试债务人有限公司\n\n二、事实摘要\n经初步整理，测试债务人有限公司尚欠款项人民币 86,500 元。\n\n三、法律依据\n以下为通用合同/金钱债务条款，具体适用以事实和证据为准。\n《中华人民共和国民法典》第五百七十七条、第五百七十九条。\n借款合同专门条款需在确认存在借款法律关系后再适用。\n\n四、催告事项\n请在收到本函后 5 个工作日内完成付款或提出书面异议。\n\n五、送达与留痕建议\n建议通过微信、短信、电子邮件或 EMS/顺丰等可查询物流的快递方式自行发送，并保留送达凭证。\n\n六、后续路径\n自行催告 → 记录回应 → 准备材料或升级人工\n\n重要提示：399 自助版不代发、不代理、不出具正式律师函；如需正式律师函、调解或代办服务，请升级人工服务。\n本文书由人工智能（AI）生成，供参考使用；正式法律文书或律师服务需升级人工服务。',
   version: 1,
   createdBy: 'user-test',
   updatedBy: 'user-test',
   createdAt: '2026-06-03T00:00:00.000Z',
   updatedAt: '2026-06-03T00:00:00.000Z'
 };
+
+const staleSelfServiceDocument = {
+  ...selfServiceDocument,
+  title: '致测试债务人有限公司的催收函（AI草稿）',
+  body: '《致测试债务人有限公司的催收函（AI草稿）》\n\n一、案件信息\n- 业务类型：欠款追偿\n- 债务人：测试债务人有限公司\n- 识别欠款金额：￥86,500\n- 争议概述：希望生成自助催收材料和下一步行动清单。\n\n二、AI 处理建议\n- 建议路径：律师函催告 → 协商调解 → 立案追偿\n- 预计周期：约 30-45 天\n- 证据缺口：暂无缺失的必传材料\n\n三、下一步行动\n1. 复制或下载催告模板，自行发送/使用后记录凭证和对方回应\n\n重要提示：AI 可生成追偿建议，律师函发送需经律师复核确认\n本文书由人工智能（AI）生成，供参考使用；正式署名或对外发送前建议由执业律师审核。'
+};
+
+const contractReviewSelfServiceCase = {
+  ...selfServiceCase,
+  id: 'case-contract-review',
+  caseType: 'contract_review',
+  debtorName: '合同审查测试交易方',
+  counterpartyName: '合同审查测试交易方',
+  partyRole: '合同签署方',
+  amount: 50000,
+  dispute: '准备签署服务合同，希望识别付款、违约和解除条款风险。',
+  claimSummary: '准备签署服务合同，希望识别付款、违约和解除条款风险。',
+  stages: nonDebtSelfServiceStages,
+  status: 'AI自助处理完成：已生成合同风险清单与修改建议'
+};
+
+const contractReviewSelfServiceWorkItems = [
+  {
+    id: 'task-contract-review-ai',
+    caseId: 'case-contract-review',
+    kind: 'ai_guidance',
+    status: 'in_progress',
+    title: 'AI自助处理包',
+    summary: '已生成《合同审查意见（AI生成）》；下一步：核对风险条款，记录是否采纳修改建议或需要人工复核。'
+  }
+];
+
+const contractReviewSelfServiceDocument = {
+  id: 'doc-contract-review-ai',
+  caseId: 'case-contract-review',
+  type: 'contract_review_opinion',
+  status: 'approved',
+  title: '合同审查意见（AI生成）',
+  fields: {
+    source: 'ai_self_service',
+    generatedAt: '2026-06-03T00:00:00.000Z'
+  },
+  body: '《合同审查意见（AI生成）》\n\n一、案件信息\n- 业务类型：合同审查\n- 合同相对方：合同审查测试交易方\n- 合同金额：￥50,000\n- 争议概述：准备签署服务合同，希望识别付款、违约和解除条款风险。\n\n二、AI 处理建议\n- 建议路径：AI初审 → 自行核对修改 → 需要时升级律师精审\n- 预计周期：约 30-45 天\n- 证据缺口：暂无缺失的必传材料\n\n三、下一步行动\n1. 核对风险条款，记录是否采纳修改建议或需要人工复核\n2. 如需正式法律意见书或律师服务，请升级人工服务\n\n重要提示：399 自助版不代发、不代理、不出具正式律师函；如需正式律师函、调解或代办服务，请升级人工服务。\n本文书由人工智能（AI）生成，供参考使用；正式法律文书或律师服务需升级人工服务。',
+  version: 1,
+  createdBy: 'user-test',
+  updatedBy: 'user-test',
+  createdAt: '2026-06-03T00:00:00.000Z',
+  updatedAt: '2026-06-03T00:00:00.000Z'
+};
+
+const nonDebtLegacySelfServiceFixtures = [
+  {
+    caseId: 'case-lawyer-letter',
+    lawCase: {
+      ...selfServiceCase,
+      id: 'case-lawyer-letter',
+      caseType: 'lawyer_letter',
+      debtorName: '海南有钱公司',
+      counterpartyName: '海南有钱公司',
+      partyRole: '权利主张方',
+      amount: 80000,
+      dispute: '相对方未按约履行合作义务，需要普通函件草稿进行事实核对和履行提醒。',
+      claimSummary: '需要函件草稿提醒对方核对事实、限期回复并保留沟通记录。',
+      stages: nonDebtSelfServiceStages,
+      status: 'AI自助处理完成：已生成函件草稿与使用清单'
+    },
+    workItems: [{
+      id: 'task-lawyer-letter-ai',
+      caseId: 'case-lawyer-letter',
+      kind: 'ai_guidance',
+      status: 'in_progress',
+      title: 'AI自助处理包',
+      summary: '已生成《致海南有钱公司的函件草稿（AI生成）》；下一步：复制或下载函件草稿；如需正式律师函，请升级人工复核。'
+    }],
+    document: {
+      ...contractReviewSelfServiceDocument,
+      id: 'doc-lawyer-letter-ai',
+      caseId: 'case-lawyer-letter',
+      type: 'lawyer_letter',
+      title: '致海南有钱公司的函件草稿（AI生成）',
+      body: '《致海南有钱公司的函件草稿（AI生成）》\n\n一、案件信息\n- 业务类型：律师函\n- 相对方：海南有钱公司\n\n二、AI 处理建议\n- 建议自行核对事实并保留沟通记录\n\n三、下一步行动\n复制或下载函件草稿，如需正式律师函，请升级人工复核。'
+    },
+    expectedTitle: '致海南有钱公司的函件草稿（AI 自助模板）',
+    expectedHeading: '法律依据与适用提示',
+    expectedLaw: /《中华人民共和国律师法》第二十八条/,
+    forbiddenText: /付款催告函|欠款追偿|债务人/
+  },
+  {
+    caseId: 'case-labor-dispute',
+    lawCase: {
+      ...selfServiceCase,
+      id: 'case-labor-dispute',
+      caseType: 'labor_dispute',
+      debtorName: '上海用工科技有限公司',
+      counterpartyName: '上海用工科技有限公司',
+      partyRole: '劳动者',
+      amount: 36000,
+      dispute: '用人单位拖欠工资并要求离职，需要整理劳动关系证据和仲裁准备材料。',
+      claimType: '拖欠工资',
+      claimSummary: '需要核对工资流水、考勤和沟通记录，准备劳动仲裁材料。',
+      stages: nonDebtSelfServiceStages,
+      status: 'AI自助处理完成：已生成劳动争议自助材料包'
+    },
+    workItems: [{
+      id: 'task-labor-ai',
+      caseId: 'case-labor-dispute',
+      kind: 'ai_guidance',
+      status: 'in_progress',
+      title: 'AI自助处理包',
+      summary: '已生成《劳动仲裁申请建议书（AI生成）》；下一步：整理劳动关系证据、沟通记录和仲裁准备清单，并记录处理结果。'
+    }],
+    document: {
+      ...contractReviewSelfServiceDocument,
+      id: 'doc-labor-ai',
+      caseId: 'case-labor-dispute',
+      type: 'arbitration_material',
+      title: '劳动仲裁申请建议书（AI生成）',
+      body: '《劳动仲裁申请建议书（AI生成）》\n\n一、案件信息\n- 业务类型：劳动争议\n- 用人单位：上海用工科技有限公司\n\n二、AI 处理建议\n- 整理工资流水、考勤和沟通记录\n\n三、下一步行动\n准备劳动仲裁材料。'
+    },
+    expectedTitle: '劳动仲裁申请建议书（AI 自助模板）',
+    expectedHeading: '法律依据与适用提示',
+    expectedLaw: /《中华人民共和国劳动争议调解仲裁法》第二十七条/,
+    forbiddenText: /付款催告函|欠款追偿|债务人/
+  },
+  {
+    caseId: 'case-rental-dispute',
+    lawCase: {
+      ...selfServiceCase,
+      id: 'case-rental-dispute',
+      caseType: 'rental_dispute',
+      debtorName: '杭州房东服务有限公司',
+      counterpartyName: '杭州房东服务有限公司',
+      partyRole: '承租人',
+      amount: 12000,
+      dispute: '退租后相对方拒绝返还押金并主张房屋损坏，需要整理租赁合同和交接证据协商处理。',
+      claimType: '押金返还',
+      claimSummary: '需要协商押金返还和房屋状态争议，并保留交接、照片和沟通记录。',
+      stages: nonDebtSelfServiceStages,
+      status: 'AI自助处理完成：已生成租赁纠纷自助处理包'
+    },
+    workItems: [{
+      id: 'task-rental-ai',
+      caseId: 'case-rental-dispute',
+      kind: 'ai_guidance',
+      status: 'in_progress',
+      title: 'AI自助处理包',
+      summary: '已生成《租赁纠纷协商函（AI草稿）》；下一步：复制或下载协商函，记录对方回应、押金/租金处理结果。'
+    }],
+    document: {
+      ...contractReviewSelfServiceDocument,
+      id: 'doc-rental-ai',
+      caseId: 'case-rental-dispute',
+      type: 'lawyer_letter',
+      title: '租赁纠纷协商函（AI草稿）',
+      body: '《租赁纠纷协商函（AI草稿）》\n\n一、案件信息\n- 业务类型：租赁纠纷\n- 相对方：杭州房东服务有限公司\n\n二、AI 处理建议\n- 整理租赁合同、押金付款凭证和交接照片\n\n三、下一步行动\n复制或下载协商函并记录对方回应。'
+    },
+    expectedTitle: '租赁纠纷协商函（AI 自助模板）',
+    expectedHeading: '法律依据与适用提示',
+    expectedLaw: /《中华人民共和国民法典》第七百二十二条/,
+    forbiddenText: /付款催告函|欠款追偿|债务人/
+  },
+  {
+    caseId: 'case-contract-review',
+    lawCase: contractReviewSelfServiceCase,
+    workItems: contractReviewSelfServiceWorkItems,
+    document: contractReviewSelfServiceDocument,
+    expectedTitle: '合同审查意见（AI 自助模板）',
+    expectedHeading: '法律依据与审查口径',
+    expectedLaw: /《中华人民共和国民法典》第四百九十六条/,
+    forbiddenText: /付款催告函|欠款追偿|债务人|发送律师函/
+  }
+];
 
 const testMessage = {
   id: 'msg-review',
@@ -346,6 +774,8 @@ const testMessage = {
 let createdCasePayload: unknown;
 let adminUpdatePayload: Record<string, unknown> | undefined;
 let adminReviewPayload: Record<string, unknown> | undefined;
+let passwordLoginPayload: Record<string, unknown> | undefined;
+let clientRegisterPayload: Record<string, unknown> | undefined;
 
 beforeEach(() => {
   window.history.pushState({}, '', '/');
@@ -355,6 +785,8 @@ beforeEach(() => {
   createdCasePayload = undefined;
   adminUpdatePayload = undefined;
   adminReviewPayload = undefined;
+  passwordLoginPayload = undefined;
+  clientRegisterPayload = undefined;
   window.scrollTo = vi.fn();
   vi.stubGlobal(
     'fetch',
@@ -364,7 +796,12 @@ beforeEach(() => {
       if (url.endsWith('/api/v1/auth/request-code')) {
         return Promise.resolve(jsonResponse({ phone: '13800001234', mockCode: '654321', expiresAt: '2026-07-30T00:00:00.000Z' }));
       }
+      if (url.endsWith('/api/v1/auth/login/password')) {
+        passwordLoginPayload = input instanceof Request ? await input.clone().json() : JSON.parse(String(init?.body));
+        return Promise.resolve(jsonResponse({ token: 'client-token', user: testUser, expiresAt: '2026-07-30T00:00:00.000Z' }));
+      }
       if (url.endsWith('/api/v1/auth/register/client')) {
+        clientRegisterPayload = input instanceof Request ? await input.clone().json() : JSON.parse(String(init?.body));
         return Promise.resolve(jsonResponse({ token: 'client-token', user: testUser, expiresAt: '2026-07-30T00:00:00.000Z' }));
       }
       if (url.endsWith('/api/v1/auth/onboard-lawyer')) {
@@ -407,6 +844,15 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/v1/cases/case-test/documents')) {
         return Promise.resolve(jsonResponse({ documents: [] }));
+      }
+      if (url.endsWith('/api/v1/cases/case-contract-review/work-items')) {
+        return Promise.resolve(jsonResponse({ workItems: contractReviewSelfServiceWorkItems }));
+      }
+      if (url.endsWith('/api/v1/cases/case-contract-review/documents')) {
+        return Promise.resolve(jsonResponse({ documents: [contractReviewSelfServiceDocument] }));
+      }
+      if (url.endsWith('/api/v1/cases/case-contract-review')) {
+        return Promise.resolve(jsonResponse({ case: contractReviewSelfServiceCase }));
       }
       if (url.endsWith('/api/v1/lawyer/cases/case-test/documents')) {
         return Promise.resolve(jsonResponse({ documents: [lawyerDocument] }));
@@ -473,7 +919,7 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('AI帮你追回应收账款')).toBeInTheDocument();
+    expect(await screen.findByText('399自助闭环追回应收账款')).toBeInTheDocument();
     expect((await screen.findAllByText('欠款追偿')).length).toBeGreaterThan(0);
     expect(await screen.findByText('律师函')).toBeInTheDocument();
     expect(await screen.findByText('劳动争议')).toBeInTheDocument();
@@ -567,6 +1013,26 @@ describe('App', () => {
     expect(screen.queryByText('律师演示')).not.toBeInTheDocument();
   });
 
+  it('submits password login and never persists the raw password', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '密码登录' }));
+    await user.type(screen.getByLabelText('手机号'), '13800001234');
+    await user.type(screen.getByLabelText('密码'), 'ClientPass123!');
+    await user.click(screen.getByRole('button', { name: '登录' }));
+
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
+    const fetchMock = vi.mocked(fetch);
+    const passwordLoginCall = fetchMock.mock.calls.find(([input]) => (input instanceof Request ? input.url : input.toString()).endsWith('/api/v1/auth/login/password'));
+    expect(passwordLoginCall).toBeTruthy();
+    expect(passwordLoginPayload).toEqual({
+      phone: '13800001234',
+      password: 'ClientPass123!'
+    });
+    expect(window.localStorage.getItem('law-ai-auth')).not.toContain('ClientPass123!');
+  });
+
   it('keeps client registration consent unchecked and required', async () => {
     const user = userEvent.setup();
     await router.navigate({ to: '/register/client' });
@@ -577,6 +1043,8 @@ describe('App', () => {
     await user.type(screen.getByLabelText('姓名'), '王先生');
     await user.type(screen.getByLabelText('手机号'), '13800001234');
     await user.type(screen.getByLabelText('验证码'), '654321');
+    await user.type(screen.getByLabelText('设置密码'), 'ClientPass123!');
+    await user.type(screen.getByLabelText('确认密码'), 'ClientPass123!');
 
     const terms = screen.getByLabelText(/服务协议/);
     const privacy = screen.getByLabelText(/隐私政策/);
@@ -589,6 +1057,52 @@ describe('App', () => {
     expect(submit).toBeDisabled();
     await user.click(privacy);
     expect(submit).toBeEnabled();
+  });
+
+  it('blocks client registration when password confirmation does not match', async () => {
+    const user = userEvent.setup();
+    await router.navigate({ to: '/register/client' });
+
+    render(<App />);
+
+    await user.type(await screen.findByLabelText('姓名'), '王先生');
+    await user.type(screen.getByLabelText('手机号'), '13800001234');
+    await user.type(screen.getByLabelText('验证码'), '654321');
+    await user.type(screen.getByLabelText('设置密码'), 'ClientPass123!');
+    await user.type(screen.getByLabelText('确认密码'), 'OtherPass123!');
+    await user.click(screen.getByLabelText(/服务协议/));
+    await user.click(screen.getByLabelText(/隐私政策/));
+    await user.click(screen.getByRole('button', { name: '完成注册' }));
+
+    expect(await screen.findByText('两次输入的密码不一致')).toBeInTheDocument();
+    const fetchMock = vi.mocked(fetch);
+    expect(fetchMock.mock.calls.some(([input]) => (input instanceof Request ? input.url : input.toString()).endsWith('/api/v1/auth/register/client'))).toBe(false);
+  });
+
+  it('submits client registration password without confirmation', async () => {
+    const user = userEvent.setup();
+    await router.navigate({ to: '/register/client' });
+
+    render(<App />);
+
+    await user.type(await screen.findByLabelText('姓名'), '王先生');
+    await user.type(screen.getByLabelText('手机号'), '13800001234');
+    await user.type(screen.getByLabelText('验证码'), '654321');
+    await user.type(screen.getByLabelText('设置密码'), 'ClientPass123!');
+    await user.type(screen.getByLabelText('确认密码'), 'ClientPass123!');
+    await user.click(screen.getByLabelText(/服务协议/));
+    await user.click(screen.getByLabelText(/隐私政策/));
+    await user.click(screen.getByRole('button', { name: '完成注册' }));
+
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
+    const fetchMock = vi.mocked(fetch);
+    const registerCall = fetchMock.mock.calls.find(([input]) => (input instanceof Request ? input.url : input.toString()).endsWith('/api/v1/auth/register/client'));
+    expect(registerCall).toBeTruthy();
+    expect(clientRegisterPayload).toMatchObject({
+      phone: '13800001234',
+      password: 'ClientPass123!'
+    });
+    expect(clientRegisterPayload).not.toHaveProperty('confirmPassword');
   });
 
   it('renders registration pages with branded hero and touch-friendly legal links', async () => {
@@ -644,6 +1158,8 @@ describe('App', () => {
     await user.type(screen.getByLabelText('姓名'), '赵律师');
     await user.type(screen.getByLabelText('手机号'), '13900008888');
     await user.type(screen.getByLabelText('验证码'), '654321');
+    await user.type(screen.getByLabelText('设置密码'), 'LawyerPass123!');
+    await user.type(screen.getByLabelText('确认密码'), 'LawyerPass123!');
     await user.type(screen.getByLabelText('律所'), '测试律师事务所');
     await user.type(screen.getByLabelText('执业证号'), '11101202010123456');
     await user.type(screen.getByLabelText('执业地区'), '上海');
@@ -1004,7 +1520,7 @@ describe('App', () => {
 
     expect(await screen.findByText('选择案件闭环路径')).toBeInTheDocument();
     expect(await screen.findByText('律师复核包')).toBeInTheDocument();
-    expect(await screen.findByText('选择此方案')).toBeInTheDocument();
+    expect((await screen.findAllByText('选择此方案')).length).toBeGreaterThan(0);
   });
 
   it('confirms service plan selection before committing it', async () => {
@@ -1021,13 +1537,36 @@ describe('App', () => {
 
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: '选择此方案' }));
+    await user.click(await screen.findByRole('button', { name: /选择律师复核包.*1499/ }));
     expect(selectSpy).not.toHaveBeenCalled();
     expect(await screen.findByText('确认选择服务方案')).toBeInTheDocument();
 
     await user.click(await screen.findByRole('button', { name: '确认选择' }));
 
     await waitFor(() => expect(selectSpy).toHaveBeenCalledWith('case-test', 'lawyer-review'));
+  });
+
+  it('highlights the pending service plan action before confirmation', async () => {
+    const user = userEvent.setup();
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), assessedCase);
+    await router.navigate({ to: '/cases/$caseId/plans', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    const selfServiceButton = await screen.findByRole('button', { name: /选择AI自助版.*399/ });
+    expect(selfServiceButton).toHaveClass('bg-slate-100');
+
+    await user.click(selfServiceButton);
+
+    expect(await screen.findByText('确认选择服务方案')).toBeInTheDocument();
+    expect(selfServiceButton).toHaveClass('bg-blue-600');
+    expect(selfServiceButton).toHaveClass('text-white');
   });
 
   it('locks service plan buttons after a plan is selected', async () => {
@@ -1042,8 +1581,8 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('button', { name: '已选择' })).toBeDisabled();
-    expect(await screen.findByRole('button', { name: '选择此方案' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /已选择律师复核包.*1499/ })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /选择AI自助版.*399/ })).toBeDisabled();
   });
 
   it('renders message center from backend notifications', async () => {
@@ -1078,6 +1617,68 @@ describe('App', () => {
     expect(await screen.findByText('律师工作台')).toBeInTheDocument();
     expect(await screen.findByText('待处理 1')).toBeInTheDocument();
     expect(await screen.findByText('律师复核待办')).toBeInTheDocument();
+  });
+
+  it('renders send proof review task and lets lawyer confirm proof', async () => {
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordLawyerFullServiceAction: (caseId: string, input: unknown) => Promise<typeof sendProofConfirmedCase> }, 'recordLawyerFullServiceAction')
+      .mockResolvedValue(sendProofConfirmedCase);
+    useAuthStore.getState().setSession({
+      token: 'lawyer-token',
+      user: testLawyer,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testLawyer);
+    queryClient.setQueryData(caseKeys.lawyerTask('task-send-proof'), { task: pendingSendProofTask, case: sendProofPendingCase });
+    queryClient.setQueryData(caseKeys.lawyerDocuments('case-test'), []);
+    await router.navigate({ to: '/lawyer/tasks/$taskId', params: { taskId: 'task-send-proof' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('确认发送凭证')).toBeInTheDocument();
+    await userEvent.type(await screen.findByPlaceholderText('填写核对意见，例如：已核对微信截图、收函主体和发送时间'), '已核对微信截图');
+    await userEvent.click(await screen.findByRole('button', { name: '确认已收到发送凭证' }));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'confirm_send_proof',
+        note: '已核对微信截图'
+      });
+    });
+  });
+
+  it('renders lawyer follow-up task and submits a response decision', async () => {
+    const decidedCase = {
+      ...sendProofConfirmedCase,
+      status: '对方无回应或拒绝，进入立案材料准备'
+    };
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordLawyerFullServiceAction: (caseId: string, input: unknown) => Promise<typeof decidedCase> }, 'recordLawyerFullServiceAction')
+      .mockResolvedValue(decidedCase);
+    useAuthStore.getState().setSession({
+      token: 'lawyer-token',
+      user: testLawyer,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testLawyer);
+    queryClient.setQueryData(caseKeys.lawyerTask('task-follow-up'), { task: pendingFollowUpTask, case: sendProofConfirmedCase });
+    queryClient.setQueryData(caseKeys.lawyerDocuments('case-test'), []);
+    await router.navigate({ to: '/lawyer/tasks/$taskId', params: { taskId: 'task-follow-up' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('处理对方回应')).toBeInTheDocument();
+    await userEvent.selectOptions(await screen.findByRole('combobox'), 'no_response');
+    await userEvent.type(await screen.findByPlaceholderText('填写律师跟进意见'), '七日无回应，准备材料');
+    await userEvent.click(await screen.findByRole('button', { name: '提交律师判断' }));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'decide_response',
+        decision: 'no_response',
+        note: '七日无回应，准备材料'
+      });
+    });
   });
 
   it('renders role-aware profile return action for lawyers', async () => {
@@ -1242,7 +1843,7 @@ describe('App', () => {
     expect(await screen.findByText('选择服务方案')).toBeInTheDocument();
   });
 
-  it('renders self-service result tasks and AI generated document read-only', async () => {
+  it('renders self-service action package and AI generated document read-only', async () => {
     useAuthStore.getState().setSession({
       token: 'test-token',
       user: testUser,
@@ -1256,15 +1857,518 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('AI自助处理结果')).toBeInTheDocument();
-    expect(await screen.findByText('已完成')).toBeInTheDocument();
+    expect((await screen.findAllByText('AI自助处理包')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('处理中')).toBeInTheDocument();
     expect(await screen.findByText('待处理')).toBeInTheDocument();
-    expect(screen.queryByText('处理中')).not.toBeInTheDocument();
-    expect((await screen.findByText('发送律师函')).parentElement).not.toHaveTextContent('进行中');
-    expect((await screen.findByText('协商调解')).parentElement).toHaveTextContent('进行中');
-    expect(await screen.findByText('致测试债务人有限公司的催收函（AI草稿）')).toBeInTheDocument();
+    expect((await screen.findAllByText('AI自助处理包'))[0].parentElement).toHaveTextContent('进行中');
+    expect((await screen.findByText('协商调解')).parentElement).not.toHaveTextContent('进行中');
+    expect(await screen.findByRole('button', { name: '复制催告文案' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '下载模板' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '下一步：我已自行发送/使用' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '已付款/已完成' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '无回应/拒绝' })).not.toBeInTheDocument();
+    expect(await screen.findByText('付款催告函（AI 自助模板）')).toBeInTheDocument();
+    expect(await screen.findByText('文书预览')).toBeInTheDocument();
+    expect(await screen.findByText('发函主体与相对方')).toBeInTheDocument();
+    expect(await screen.findByText('法律依据')).toBeInTheDocument();
+    expect(await screen.findByText(/以下为通用合同\/金钱债务条款/)).toBeInTheDocument();
+    expect(await screen.findByText(/《中华人民共和国民法典》第五百七十七条/)).toBeInTheDocument();
+    expect(screen.queryByText(/《中华人民共和国民法典》第六百七十五条/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/《中华人民共和国民法典》第六百七十六条/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/借款合同专门条款需在确认存在借款法律关系后再适用/)).toBeInTheDocument();
+    expect(await screen.findByText('送达与留痕建议')).toBeInTheDocument();
     expect(await screen.findByText('AI生成')).toBeInTheDocument();
+    expect(await screen.findByText(/自行催告 → 记录回应 → 准备材料或升级人工/)).toBeInTheDocument();
+    expect(screen.queryByText(/律师函催告 → 协商调解 → 立案追偿/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/律师函发送需经律师复核确认/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/催收函/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '确认文书并进入下一阶段' })).not.toBeInTheDocument();
+    expect(await screen.findByText('399 自助版不代发、不代理、不出具正式律师函；正式律师函、调解或代办服务需升级人工服务。')).toBeInTheDocument();
+  });
+
+  it('upgrades stale self-service document summaries into formal payment demand previews', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), selfServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), selfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [staleSelfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('付款催告函（AI 自助模板）')).toBeInTheDocument();
+    expect(await screen.findByText('旧版补全')).toBeInTheDocument();
+    expect(await screen.findByText('法律依据')).toBeInTheDocument();
+    expect(await screen.findByText(/以下为通用合同\/金钱债务条款/)).toBeInTheDocument();
+    expect(await screen.findByText(/《中华人民共和国民法典》第五百七十七条/)).toBeInTheDocument();
+    expect(await screen.findByText(/《中华人民共和国民法典》第五百八十三条/)).toBeInTheDocument();
+    expect(screen.queryByText(/《中华人民共和国民法典》第六百七十五条/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/《中华人民共和国民法典》第六百七十六条/)).not.toBeInTheDocument();
+    expect(await screen.findByText('送达与留痕建议')).toBeInTheDocument();
+    expect(await screen.findByText(/建议通过微信、短信、电子邮件或 EMS\/顺丰等可查询物流的快递方式自行发送/)).toBeInTheDocument();
+    expect(screen.queryByText(/催收函/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/律师函催告 → 协商调解 → 立案追偿/)).not.toBeInTheDocument();
+  });
+
+  it.each(nonDebtLegacySelfServiceFixtures)('upgrades stale $caseId self-service previews with case-specific legal basis', async ({ caseId, lawCase, workItems, document, expectedTitle, expectedHeading, expectedLaw, forbiddenText }) => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail(caseId), lawCase);
+    queryClient.setQueryData(caseKeys.workItems(caseId), workItems);
+    queryClient.setQueryData(caseKeys.documents(caseId), [document]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId } });
+
+    render(<App />);
+
+    expect(await screen.findByText(expectedTitle)).toBeInTheDocument();
+    expect(await screen.findByText(expectedHeading)).toBeInTheDocument();
+    expect(await screen.findByText(expectedLaw)).toBeInTheDocument();
+    expect(await screen.findByText('旧版补全')).toBeInTheDocument();
+    expect(screen.queryByText('付款催告函（AI 自助模板）')).not.toBeInTheDocument();
+    expect(screen.queryByText(forbiddenText)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '复制催告文案' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '复制模板内容' })).toBeInTheDocument();
+  });
+
+  it('normalizes stale self-service stages to one active next action', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), selfServiceEscalationCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), selfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [selfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect((await screen.findByText('立案材料准备')).parentElement).toHaveTextContent('进行中');
+    expect((await screen.findByText('协商调解')).parentElement).not.toHaveTextContent('进行中');
+    expect(screen.getAllByText('进行中')).toHaveLength(1);
+    expect(await screen.findByRole('button', { name: '升级人工服务' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '已付款/已完成' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '复制催告文案' })).not.toBeInTheDocument();
+  });
+
+  it('shows upgraded self-service cases as handed off instead of repeatable actions', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), selfServiceUpgradedCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), selfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [selfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect((await screen.findAllByText('已申请升级人工服务')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/399 自助处理已交接/)).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '升级人工服务' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '已付款/已完成' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '无回应/拒绝' })).not.toBeInTheDocument();
+  });
+
+  it('closes completed self-service cases without next-step document hints or primary evidence actions', async () => {
+    const completedCase = {
+      ...selfServiceCase,
+      status: '已完成自助处理',
+      stages: [
+        ...selfServiceCase.stages.map((stage) => ({
+          ...stage,
+          status: 'done',
+          at: stage.at ?? '2026-06-05'
+        })),
+        {
+          key: 'filing',
+          title: '立案材料准备',
+          description: '自助处理已完成，无需继续准备立案材料',
+          status: 'done',
+          at: '2026-06-05'
+        },
+        {
+          key: 'recovery',
+          title: '回款 / 结案',
+          description: '已确认回款或自助处理完成',
+          status: 'done',
+          at: '2026-06-05'
+        }
+      ]
+    };
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), completedCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), selfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [selfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('自助处理已完成')).toBeInTheDocument();
+    expect(await screen.findByText('处理记录')).toBeInTheDocument();
+    expect(screen.queryByText('下一步建议见 AI 自助任务摘要')).not.toBeInTheDocument();
+    expect(screen.queryByText('补充证据')).not.toBeInTheDocument();
+    expect(await screen.findByText('补充留存材料')).toBeInTheDocument();
+    expect(await screen.findByText('查看处理记录')).toBeInTheDocument();
+  });
+
+  it('records self-service action from the case detail panel', async () => {
+    const updatedCase = {
+      ...selfServiceCase,
+      status: '已自行处理，等待对方回应'
+    };
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordSelfServiceAction: (caseId: string, input: unknown) => Promise<typeof updatedCase> }, 'recordSelfServiceAction')
+      .mockResolvedValue(updatedCase);
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), selfServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), selfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [selfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '下一步：我已自行发送/使用' }));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'mark_sent',
+        channel: '自行发送',
+        note: '用户确认已自行发送或使用 AI 自助材料'
+      });
+    });
+  });
+
+  it('renders lawyer finalized document copy actions for 1499 cases without full-service follow-up controls', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), approvedLawyerServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), [lawyerTask]);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [approvedLawyerServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('律师定稿文书')).toBeInTheDocument();
+    expect(await screen.findByText('客户可复制或下载律师定稿文书，自行发送并保留送达和沟通凭证。')).toBeInTheDocument();
+    expect(await screen.findByText('正式催款律师函')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '复制定稿文书' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '下载定稿文书' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '我已自行发送' })).not.toBeInTheDocument();
+    expect(screen.queryByText('记录对方回应')).not.toBeInTheDocument();
+  });
+
+  it('copies and downloads the lawyer finalized document for 1499 cases', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true
+    });
+    const clickSpy = vi.fn();
+    const appendSpy = vi.spyOn(document.body, 'appendChild');
+    const removeSpy = vi.spyOn(document.body, 'removeChild');
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:lawyer-letter'), configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
+    vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      const element = document.createElementNS('http://www.w3.org/1999/xhtml', tagName) as HTMLElement;
+      if (tagName === 'a') {
+        Object.defineProperty(element, 'click', { value: clickSpy });
+      }
+      return element;
+    });
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordLawyerServiceAction: (caseId: string, input: unknown) => Promise<typeof approvedLawyerServiceCase> }, 'recordLawyerServiceAction')
+      .mockResolvedValue(approvedLawyerServiceCase);
+    const fetchMock = vi.mocked(fetch);
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/api/v1/cases/case-test/documents')) {
+        return jsonResponse({ documents: [approvedLawyerServiceDocument] });
+      }
+      if (url.endsWith('/api/v1/cases/case-test')) {
+        return jsonResponse({ case: approvedLawyerServiceCase });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse({});
+    });
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), approvedLawyerServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), [lawyerTask]);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [approvedLawyerServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '下载定稿文书' }));
+    await userEvent.click(await screen.findByRole('button', { name: '复制定稿文书' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('请贵司收到本函后三日内支付全部欠款及逾期损失。'));
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'copy_document',
+        note: '客户已复制律师定稿文书'
+      });
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'download_document',
+        note: '客户已下载律师定稿文书'
+      });
+    });
+    expect(appendSpy).toHaveBeenCalled();
+    expect(removeSpy).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
+  });
+
+  it('submits 5999 send proof and waits for lawyer confirmation before showing response actions', async () => {
+    const updatedCase = {
+      ...sendProofPendingCase
+    };
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordFullServiceAction: (caseId: string, input: unknown) => Promise<typeof updatedCase> }, 'recordFullServiceAction')
+      .mockResolvedValue(updatedCase);
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), approvedFullServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), []);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [approvedLawyerServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('5999 诉前全程跟进')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '上传发送凭证' })).toHaveAttribute('href', '/cases/case-test/evidence');
+    expect(screen.queryByText('记录对方回应')).not.toBeInTheDocument();
+
+    await userEvent.click(await screen.findByRole('button', { name: '提交凭证给律师确认' }));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'submit_send_proof',
+        channel: '客户自行发送',
+        note: '客户已自行发送律师定稿文书并提交发送凭证'
+      });
+    });
+  });
+
+  it('hides 5999 response actions while send proof is pending lawyer confirmation', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), sendProofPendingCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), [pendingSendProofTask]);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [approvedLawyerServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('已收到发送凭证，等待律师确认。律师确认前不会开放“记录对方回应”，避免没有送达留痕就进入协商阶段。')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '对方已履行或已完成' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '承诺付款 / 分期 / 希望协商' })).not.toBeInTheDocument();
+  });
+
+  it('records 5999 opponent response only after lawyer confirms send proof', async () => {
+    const updatedCase = {
+      ...sendProofConfirmedCase,
+      status: '已记录对方回应，待律师跟进'
+    };
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordFullServiceAction: (caseId: string, input: unknown) => Promise<typeof updatedCase> }, 'recordFullServiceAction')
+      .mockResolvedValue(updatedCase);
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), sendProofConfirmedCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), [{ ...pendingSendProofTask, status: 'completed' }]);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [approvedLawyerServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('记录对方回应')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: '承诺付款 / 分期 / 希望协商' }));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'record_response',
+        response: 'promised',
+        note: '客户记录对方承诺付款、分期或希望继续协商'
+      });
+    });
+  });
+
+  it('copies the self-service template and records copy success only after clipboard succeeds', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true
+    });
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordSelfServiceAction: (caseId: string, input: unknown) => Promise<typeof contractReviewSelfServiceCase> }, 'recordSelfServiceAction')
+      .mockResolvedValue(contractReviewSelfServiceCase);
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-contract-review'), contractReviewSelfServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-contract-review'), contractReviewSelfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-contract-review'), [contractReviewSelfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-contract-review' } });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '复制模板内容' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('合同审查意见'));
+      expect(recordSpy).toHaveBeenCalledWith('case-contract-review', {
+        action: 'copy_template',
+        note: '用户已复制 AI 自助模板'
+      });
+    });
+    expect(await screen.findByText('模板内容已复制，请按当前业务场景自行核对后使用。')).toBeInTheDocument();
+  });
+
+  it('opens a manual copy sheet without recording copy success when browser copy is blocked', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('clipboard blocked'));
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true
+    });
+    Object.defineProperty(document, 'execCommand', {
+      value: undefined,
+      configurable: true
+    });
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordSelfServiceAction: (caseId: string, input: unknown) => Promise<typeof contractReviewSelfServiceCase> }, 'recordSelfServiceAction')
+      .mockResolvedValue(contractReviewSelfServiceCase);
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-contract-review'), contractReviewSelfServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-contract-review'), contractReviewSelfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-contract-review'), [contractReviewSelfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-contract-review' } });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '复制模板内容' }));
+
+    const dialog = await screen.findByRole('dialog', { name: '合同审查意见（AI 自助模板）' });
+    expect(within(dialog).getByText('手动复制模板')).toBeInTheDocument();
+    expect(within(dialog).getByText('合同审查意见（AI 自助模板）')).toBeInTheDocument();
+    const textArea = within(dialog).getByRole('textbox', { name: '合同审查意见（AI 自助模板）全文' });
+    expect((textArea as HTMLTextAreaElement).value).toContain('风险条款');
+    expect(within(dialog).getByRole('button', { name: '下载 TXT' })).toBeEnabled();
+    expect(recordSpy).not.toHaveBeenCalledWith('case-contract-review', {
+      action: 'copy_template',
+      note: '用户已复制 AI 自助模板'
+    });
+  });
+
+  it('downloads the self-service template as a mounted txt link', async () => {
+    const clickSpy = vi.fn();
+    vi.spyOn(apiModule as unknown as { recordSelfServiceAction: (caseId: string, input: unknown) => Promise<typeof selfServiceCase> }, 'recordSelfServiceAction')
+      .mockResolvedValue(selfServiceCase);
+    const appendSpy = vi.spyOn(document.body, 'appendChild');
+    const removeSpy = vi.spyOn(document.body, 'removeChild');
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:test-template'), configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
+    vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      const element = document.createElementNS('http://www.w3.org/1999/xhtml', tagName) as HTMLElement;
+      if (tagName === 'a') {
+        Object.defineProperty(element, 'click', { value: clickSpy });
+      }
+      return element as HTMLElementTagNameMap[keyof HTMLElementTagNameMap];
+    });
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), selfServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), selfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [selfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+    render(<App />);
+    appendSpy.mockClear();
+    removeSpy.mockClear();
+
+    await userEvent.click(await screen.findByRole('button', { name: '下载模板' }));
+
+    expect(appendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      download: '付款催告函（AI 自助模板）.txt',
+      href: 'blob:test-template'
+    }));
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(removeSpy).toHaveBeenCalled();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test-template');
+  });
+
+  it('keeps self-service controls out of lawyer-review and full-service cases', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), lockedPlanCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), [lawyerTask]);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [pendingLawyerDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('律师服务闭环')).toBeInTheDocument();
+    expect(await screen.findByText('发送律师函')).toBeInTheDocument();
+    expect(await screen.findByText('确认文书并进入下一阶段')).toBeInTheDocument();
+    expect(screen.queryByText('399 自助闭环')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '复制催告文案' })).not.toBeInTheDocument();
+    expect(screen.queryByText('399 自助版不代发、不代理、不出具正式律师函；正式律师函、调解或代办服务需升级人工服务。')).not.toBeInTheDocument();
   });
 });
 

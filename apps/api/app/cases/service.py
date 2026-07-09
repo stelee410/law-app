@@ -1,4 +1,12 @@
-from app.schemas import CreateCaseInput, LawCase, PlanId
+from app.schemas import (
+  CreateCaseInput,
+  FullServiceActionInput,
+  LawCase,
+  LawyerFullServiceActionInput,
+  LawyerServiceActionInput,
+  PlanId,
+  SelfServiceActionInput,
+)
 from app.store import AppStore
 
 
@@ -16,3 +24,39 @@ def get_case(store: AppStore, user_id: str, case_id: str) -> LawCase | None:
 
 def select_plan(store: AppStore, user_id: str, case_id: str, plan_id: PlanId) -> LawCase | None:
   return store.select_plan(user_id, case_id, plan_id)
+
+
+def record_self_service_action(
+  store: AppStore,
+  user_id: str,
+  case_id: str,
+  input_data: SelfServiceActionInput,
+) -> LawCase | None:
+  return store.record_self_service_action(user_id, case_id, input_data)
+
+
+def record_lawyer_service_action(
+  store: AppStore,
+  user_id: str,
+  case_id: str,
+  input_data: LawyerServiceActionInput,
+) -> LawCase | None:
+  return store.record_lawyer_service_action(user_id, case_id, input_data)
+
+
+def record_full_service_action(
+  store: AppStore,
+  user_id: str,
+  case_id: str,
+  input_data: FullServiceActionInput,
+) -> LawCase | None:
+  return store.record_full_service_action(user_id, case_id, input_data)
+
+
+def record_lawyer_full_service_action(
+  store: AppStore,
+  lawyer_id: str,
+  case_id: str,
+  input_data: LawyerFullServiceActionInput,
+) -> LawCase | None:
+  return store.record_lawyer_full_service_action(lawyer_id, case_id, input_data)

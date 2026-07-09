@@ -19,8 +19,13 @@ import {
   getMe,
   getMessages,
   loginWithCode,
+  loginWithPassword,
   markMessageRead,
   onboardLawyer,
+  recordFullServiceAction,
+  recordLawyerFullServiceAction,
+  recordLawyerServiceAction,
+  recordSelfServiceAction,
   requestLoginCode,
   registerClient,
   reviewAdminLawyer,
@@ -37,9 +42,14 @@ import type {
   ClientRegisterInput,
   CreateDocumentInput,
   CreateCaseInput,
+  FullServiceActionInput,
   LawCase,
+  LawyerFullServiceActionInput,
+  LawyerServiceActionInput,
   LawyerOnboardingInput,
+  PasswordLoginInput,
   PlanId,
+  SelfServiceActionInput,
   SubmitReviewInput,
   UpdateDocumentInput
 } from '../lib/types';
@@ -199,7 +209,13 @@ export function useLoginMutation() {
   const queryClient = useQueryClient();
   const setSession = useAuthStore((state) => state.setSession);
   return useMutation({
-    mutationFn: ({ phone, code }: { phone: string; code: string }) => loginWithCode(phone, code),
+    mutationFn: (input: ({ mode: 'code'; code: string } | { mode: 'password'; password: string }) & { phone: string }) => {
+      if (input.mode === 'password') {
+        const passwordInput: PasswordLoginInput = { phone: input.phone, password: input.password };
+        return loginWithPassword(passwordInput);
+      }
+      return loginWithCode(input.phone, input.code);
+    },
     onSuccess: async (session) => {
       setSession(session);
       queryClient.setQueryData(caseKeys.me, session.user);
@@ -292,6 +308,67 @@ export function useSelectPlanMutation(caseId: string) {
         queryClient.invalidateQueries({ queryKey: caseKeys.lists }),
         queryClient.invalidateQueries({ queryKey: caseKeys.workItems(caseId) }),
         queryClient.invalidateQueries({ queryKey: caseKeys.documents(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.messages })
+      ]);
+    }
+  });
+}
+
+export function useRecordSelfServiceActionMutation(caseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: SelfServiceActionInput) => recordSelfServiceAction(caseId, input),
+    onSuccess: async (lawCase) => {
+      queryClient.setQueryData(caseKeys.detail(caseId), lawCase);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: caseKeys.lists }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.workItems(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.messages })
+      ]);
+    }
+  });
+}
+
+export function useRecordLawyerServiceActionMutation(caseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: LawyerServiceActionInput) => recordLawyerServiceAction(caseId, input),
+    onSuccess: async (lawCase) => {
+      queryClient.setQueryData(caseKeys.detail(caseId), lawCase);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: caseKeys.lists }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.workItems(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.documents(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.messages })
+      ]);
+    }
+  });
+}
+
+export function useRecordFullServiceActionMutation(caseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: FullServiceActionInput) => recordFullServiceAction(caseId, input),
+    onSuccess: async (lawCase) => {
+      queryClient.setQueryData(caseKeys.detail(caseId), lawCase);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: caseKeys.lists }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.workItems(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.documents(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.messages })
+      ]);
+    }
+  });
+}
+
+export function useRecordLawyerFullServiceActionMutation(caseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: LawyerFullServiceActionInput) => recordLawyerFullServiceAction(caseId, input),
+    onSuccess: async (lawCase) => {
+      queryClient.setQueryData(caseKeys.detail(caseId), lawCase);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: caseKeys.lawyerTasks }),
         queryClient.invalidateQueries({ queryKey: caseKeys.messages })
       ]);
     }

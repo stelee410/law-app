@@ -9,14 +9,19 @@ import type {
   ClientRegisterInput,
   CreateDocumentInput,
   CreateCaseInput,
+  FullServiceActionInput,
   HealthResponse,
+  LawyerFullServiceActionInput,
+  LawyerServiceActionInput,
   LawyerOnboardingInput,
   LegalDocument,
   LawCase,
   NotificationMessage,
   OtpResponse,
+  PasswordLoginInput,
   PlanId,
   ReviewOpinion,
+  SelfServiceActionInput,
   SubmitReviewInput,
   UpdateDocumentInput,
   User,
@@ -74,6 +79,10 @@ export async function requestLoginCode(phone: string): Promise<OtpResponse> {
 
 export async function loginWithCode(phone: string, code: string): Promise<AuthToken> {
   return api.post(apiUrl('/auth/login'), { json: { phone, code } }).json<AuthToken>();
+}
+
+export async function loginWithPassword(input: PasswordLoginInput): Promise<AuthToken> {
+  return api.post(apiUrl('/auth/login/password'), { json: input }).json<AuthToken>();
 }
 
 export async function registerClient(input: ClientRegisterInput): Promise<AuthToken> {
@@ -149,6 +158,34 @@ export async function evaluateCase(caseId: string): Promise<LawCase> {
 
 export async function selectCasePlan(caseId: string, planId: PlanId): Promise<LawCase> {
   const response = await api.post(apiUrl(`/cases/${caseId}/plan`), { json: { planId } }).json<{ case: LawCase }>();
+  return response.case;
+}
+
+export async function recordSelfServiceAction(caseId: string, input: SelfServiceActionInput): Promise<LawCase> {
+  const response = await api
+    .post(apiUrl(`/cases/${caseId}/self-service/actions`), { json: input })
+    .json<{ case: LawCase }>();
+  return response.case;
+}
+
+export async function recordLawyerServiceAction(caseId: string, input: LawyerServiceActionInput): Promise<LawCase> {
+  const response = await api
+    .post(apiUrl(`/cases/${caseId}/lawyer-service/actions`), { json: input })
+    .json<{ case: LawCase }>();
+  return response.case;
+}
+
+export async function recordFullServiceAction(caseId: string, input: FullServiceActionInput): Promise<LawCase> {
+  const response = await api
+    .post(apiUrl(`/cases/${caseId}/full-service/actions`), { json: input })
+    .json<{ case: LawCase }>();
+  return response.case;
+}
+
+export async function recordLawyerFullServiceAction(caseId: string, input: LawyerFullServiceActionInput): Promise<LawCase> {
+  const response = await api
+    .post(apiUrl(`/lawyer/cases/${caseId}/full-service/actions`), { json: input })
+    .json<{ case: LawCase }>();
   return response.case;
 }
 

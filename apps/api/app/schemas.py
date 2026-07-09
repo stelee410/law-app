@@ -10,7 +10,7 @@ PlanId = Literal["self-service", "lawyer-review", "full-service"]
 UserRole = Literal["client", "lawyer", "admin"]
 AccountStatus = Literal["active", "disabled"]
 LawyerReviewStatus = Literal["none", "pending_review", "approved", "rejected"]
-WorkItemKind = Literal["ai_guidance", "lawyer_review", "document_draft", "document_revision"]
+WorkItemKind = Literal["ai_guidance", "lawyer_review", "document_draft", "document_revision", "send_proof_review", "lawyer_follow_up"]
 WorkItemStatus = Literal["pending", "in_progress", "completed", "cancelled"]
 RiskLevel = Literal["low", "medium", "high"]
 ReviewNextAction = Literal[
@@ -24,6 +24,67 @@ ReviewNextAction = Literal[
 LegalDocumentType = Literal["lawyer_letter", "arbitration_material", "contract_review_opinion"]
 LegalDocumentStatus = Literal["draft", "pending_client_approval", "approved", "sent", "archived"]
 NotificationType = Literal["case", "task", "review", "document", "system"]
+SelfServiceAction = Literal[
+  "copy_template",
+  "download_template",
+  "mark_sent",
+  "upload_proof",
+  "record_response",
+  "close_case",
+  "upgrade_service",
+]
+SelfServiceResponse = Literal[
+  "paid",
+  "promised",
+  "installment",
+  "rejected",
+  "no_response",
+  "need_review",
+  "completed",
+]
+LawyerServiceAction = Literal[
+  "copy_document",
+  "download_document",
+  "mark_sent",
+  "record_response",
+  "request_lawyer_followup",
+  "prepare_filing",
+  "close_case",
+]
+LawyerServiceResponse = Literal[
+  "paid",
+  "completed",
+  "promised",
+  "installment",
+  "mediation_requested",
+  "rejected",
+  "no_response",
+]
+FullServiceAction = Literal[
+  "copy_document",
+  "download_document",
+  "submit_send_proof",
+  "record_response",
+  "close_case",
+]
+FullServiceResponse = Literal[
+  "paid",
+  "completed",
+  "promised",
+  "installment",
+  "mediation_requested",
+  "rejected",
+  "no_response",
+  "delivery_failed",
+]
+LawyerFullServiceAction = Literal[
+  "confirm_send_proof",
+  "reject_send_proof",
+  "decide_response",
+  "prepare_filing",
+  "close_case",
+]
+LawyerFullServiceDecision = FullServiceResponse
 CaseStageKey = Literal[
   "submit",
   "evidence",
@@ -57,10 +118,16 @@ ErrorCode = Literal[
   "INTERNAL_ERROR",
   "USER_NOT_FOUND",
   "ACCOUNT_DISABLED",
+  "APPROVED_LAWYER_LETTER_REQUIRED",
+  "DECISION_REQUIRED",
+  "FULL_SERVICE_REQUIRED",
   "LAWYER_NOT_APPROVED",
   "LAWYER_REJECTED",
   "FORBIDDEN",
   "LAST_ADMIN_REQUIRED",
+  "RESPONSE_REQUIRED",
+  "SEND_PROOF_CONFIRMATION_REQUIRED",
+  "SEND_PROOF_REQUIRED",
 ]
 
 
@@ -247,8 +314,13 @@ class LoginInput(RequestCodeInput):
   code: str = Field(min_length=4)
 
 
+class PasswordLoginInput(RequestCodeInput):
+  password: str = Field(min_length=8, max_length=128)
+
+
 class ClientRegisterInput(LoginInput):
   name: str = Field(min_length=1)
+  password: str | None = Field(default=None, min_length=8, max_length=128)
   acceptedTerms: bool
   acceptedPrivacy: bool
 
@@ -329,6 +401,33 @@ class CreateCaseInput(ApiModel):
 
 class SelectPlanInput(ApiModel):
   planId: PlanId
+
+
+class SelfServiceActionInput(ApiModel):
+  action: SelfServiceAction
+  channel: str | None = None
+  response: SelfServiceResponse | None = None
+  note: str | None = None
+
+
+class LawyerServiceActionInput(ApiModel):
+  action: LawyerServiceAction
+  channel: str | None = None
+  response: LawyerServiceResponse | None = None
+  note: str | None = None
+
+
+class FullServiceActionInput(ApiModel):
+  action: FullServiceAction
+  channel: str | None = None
+  response: FullServiceResponse | None = None
+  note: str | None = None
+
+
+class LawyerFullServiceActionInput(ApiModel):
+  action: LawyerFullServiceAction
+  decision: LawyerFullServiceDecision | None = None
+  note: str | None = None
 
 
 class SubmitReviewInput(ApiModel):

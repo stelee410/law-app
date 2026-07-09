@@ -1,4 +1,4 @@
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { request } from 'node:http';
 import { createServer } from 'node:http';
@@ -35,17 +35,47 @@ createServer((req, res) => {
   const urlPath = decodeURIComponent(req.url.split('?')[0]);
   const safePath = normalize(urlPath).replace(/^(\.\.[/\\])+/, '');
   const requestedPath = join(root, safePath === '/' ? 'index.html' : safePath);
-  const filePath = existsSync(requestedPath) ? requestedPath : join(root, 'index.html');
+  let filePath;
+  try {
+    filePath = resolveStaticFile(requestedPath);
+  } catch {
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Internal server error');
+    return;
+  }
   const ext = extname(filePath);
 
   res.writeHead(200, {
     'Content-Type': contentTypes[ext] || 'application/octet-stream',
     'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable'
   });
-  createReadStream(filePath).pipe(res);
+  const stream = createReadStream(filePath);
+  stream.on('error', () => {
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    }
+    res.end('Internal server error');
+  });
+  stream.pipe(res);
 }).listen(port, () => {
   console.log(`law-ai-web listening on ${port}`);
 });
+
+function resolveStaticFile(requestedPath) {
+  const requestedStats = readStats(requestedPath);
+  if (requestedStats?.isFile()) return requestedPath;
+  return join(root, 'index.html');
+}
+
+function readStats(filePath) {
+  try {
+    return statSync(filePath);
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+}
 
 function proxyApi(clientReq, clientRes) {
   const target = new URL(clientReq.url || '/', apiTarget);
