@@ -58,9 +58,22 @@ ssh ecs-user@8.210.32.131
 
 ```bash
 ssh ecs-user@8.210.32.131 'mkdir -p /opt/law-app'
-scp docker/prod.env.example ecs-user@8.210.32.131:/opt/law-app/.env
-ssh ecs-user@8.210.32.131 'nano /opt/law-app/.env'
+scp docker/prod.env.example ecs-user@8.210.32.131:/opt/law-app/prod.env.example
+ssh ecs-user@8.210.32.131
 ```
+
+首次部署前，必须在 ECS 上手动创建一次 `/opt/law-app/.env`：
+
+```bash
+cd /opt/law-app
+cp prod.env.example .env
+chmod 600 .env
+openssl rand -hex 32
+openssl rand -base64 32
+nano .env
+```
+
+至少替换 `JWT_SECRET_KEY` 和 `POSTGRES_PASSWORD`，不能保留 `replace-with...` 占位值。`deploy.sh` 每次会同步新的 `prod.env.example`，但不会覆盖已有 `.env`；`.env` 创建并配置好以后，后续部署不需要重复手动创建。
 
 ### 3. 生产 `.env` 填写清单
 
@@ -145,6 +158,8 @@ cd /usr/local/src/law-app
 git pull
 ./docker/deploy.sh
 ```
+
+只要 ECS 上已经存在 `/opt/law-app/.env`，后续日常部署都走上面的 VM 命令即可。脚本会自动构建镜像、上传镜像、同步 compose 文件、启动/更新 PostgreSQL、API 和 Web，并执行健康检查；不需要每次手动在 ECS 上运行 `docker compose up`，除非正在排障。
 
 脚本默认部署到 `ecs-user@8.210.32.131:/opt/law-app`。可覆盖：
 
@@ -295,6 +310,7 @@ curl -sI "https://<domain>/sw.js?cb=$(date +%s)" | grep -iE 'cache-control|cf-ca
 | --- | --- |
 | SSH 失败 | 确认构建 VM 能用同一用户免密登录 ECS；当前 Windows 环境没有默认私钥时，Codex 无法直接登录。 |
 | 远端缺 `.env` | 用 `docker/prod.env.example` 派生 `/opt/law-app/.env`，替换 secret 后再部署。 |
+| 镜像已上传但没有容器 | 如果 `docker images` 能看到 `law-app-api` / `law-app-web`，但 `docker ps -a` 为空，优先检查 `cd /opt/law-app && test -f .env`。缺 `.env` 时 `deploy.sh` 会在远程启动阶段退出，只会留下已上传镜像，不会创建容器。 |
 | `docker build` 失败 | 先看 `pnpm-lock.yaml` / `uv.lock` 是否与依赖声明一致。 |
 | Web 200 但 API 502 | 查 `docker logs law-app-api` 和 `docker logs law-app-web`，确认 API health、Postgres 密码和网络。 |
 | Postgres 不健康 | 查 `docker logs law-app-postgres`，确认 `POSTGRES_PASSWORD`、磁盘空间和数据卷权限。 |
