@@ -375,7 +375,13 @@ def test_lawyer_review_document_closed_loop() -> None:
   )
   assert approved_document.status_code == 200
   assert approved_document.json()["document"]["status"] == "approved"
-  assert approved_document.json()["case"]["status"] == "律师函已确认"
+  approved_case = approved_document.json()["case"]
+  assert approved_case["status"] == "律师函已定稿，待客户自行发送"
+  letter_stage = next(stage for stage in approved_case["stages"] if stage["key"] == "letter")
+  negotiation_stage = next(stage for stage in approved_case["stages"] if stage["key"] == "negotiation")
+  assert letter_stage["status"] == "active"
+  assert letter_stage["description"] == "律师函已定稿，待客户下载或复制后自行发送"
+  assert negotiation_stage["status"] == "todo"
 
   messages_after_approval = client.get("/api/v1/messages", headers=client_headers)
   assert messages_after_approval.status_code == 200
@@ -406,6 +412,130 @@ def test_lawyer_review_document_closed_loop() -> None:
   )
   assert archived_document.status_code == 409
   assert archived_document.json()["detail"] == "INVALID_STATE"
+
+
+def test_lawyer_review_follow_up_actions_advance_mvp_loop() -> None:
+  client = TestClient(create_app(_test_settings()))
+  client_headers, lawyer_headers, case_id, _document = _create_approved_lawyer_letter_case(client)
+
+  copied = client.post(
+    f"/api/v1/cases/{case_id}/lawyer-service/actions",
+    headers=client_headers,
+    json={"action": "copy_document", "note": "客户已复制律师定稿文书"},
+  )
+  assert copied.status_code == 200
+  copied_case = copied.json()["case"]
+  copied_letter_stage = next(stage for stage in copied_case["stages"] if stage["key"] == "letter")
+  assert copied_case["status"] == "律师函已定稿，待客户自行发送"
+  assert copied_letter_stage["status"] == "active"
+
+  sent = client.post(
+    f"/api/v1/cases/{case_id}/lawyer-service/actions",
+    headers=client_headers,
+    json={"action": "mark_sent", "channel": "微信", "note": "客户已自行微信发送律师函"},
+  )
+  assert sent.status_code == 200
+  sent_case = sent.json()["case"]
+  letter_stage = next(stage for stage in sent_case["stages"] if stage["key"] == "letter")
+  negotiation_stage = next(stage for stage in sent_case["stages"] if stage["key"] == "negotiation")
+  assert sent_case["status"] == "已记录自行发送，等待对方回应"
+  assert letter_stage["status"] == "done"
+  assert negotiation_stage["status"] == "active"
+  assert negotiation_stage["title"] == "协商跟进"
+
+  promised = client.post(
+    f"/api/v1/cases/{case_id}/lawyer-service/actions",
+    headers=client_headers,
+    json={"action": "record_response", "response": "promised", "note": "对方承诺三日内付款"},
+  )
+  assert promised.status_code == 200
+  promised_case = promised.json()["case"]
+  promised_negotiation_stage = next(stage for stage in promised_case["stages"] if stage["key"] == "negotiation")
+  assert promised_case["status"] == "对方承诺履行，律师继续跟进"
+  assert promised_negotiation_stage["status"] == "active"
+
+  lawyer_tasks = client.get("/api/v1/lawyer/tasks", headers=lawyer_headers)
+  assert lawyer_tasks.status_code == 200
+  assert any(
+    task["kind"] == "lawyer_follow_up" and task["caseId"] == case_id and task["status"] == "pending"
+    for task in lawyer_tasks.json()["tasks"]
+  )
+
+  no_response = client.post(
+    f"/api/v1/cases/{case_id}/lawyer-service/actions",
+    headers=client_headers,
+    json={"action": "record_response", "response": "no_response", "note": "五日无回应"},
+  )
+  assert no_response.status_code == 200
+  no_response_case = no_response.json()["case"]
+  no_response_negotiation_stage = next(stage for stage in no_response_case["stages"] if stage["key"] == "negotiation")
+  filing_stage = next(stage for stage in no_response_case["stages"] if stage["key"] == "filing")
+  assert no_response_case["status"] == "对方无回应或拒绝，建议准备立案材料"
+  assert no_response_negotiation_stage["status"] == "done"
+  assert filing_stage["status"] == "active"
+
+  paid = client.post(
+    f"/api/v1/cases/{case_id}/lawyer-service/actions",
+    headers=client_headers,
+    json={"action": "record_response", "response": "paid", "note": "对方已付款"},
+  )
+  assert paid.status_code == 200
+  paid_case = paid.json()["case"]
+  paid_stages = {stage["key"]: stage for stage in paid_case["stages"]}
+  assert paid_case["status"] == "对方已履行，案件可结案"
+  assert paid_stages["negotiation"]["status"] == "done"
+  assert paid_stages["filing"]["status"] == "done"
+  assert paid_stages["recovery"]["status"] == "done"
+
+
+def test_lawyer_review_follow_up_requires_approved_lawyer_letter() -> None:
+  client = TestClient(create_app(_test_settings()))
+  client_headers = _register_client(client, phone="13800001234")
+  _create_approved_lawyer(client)
+  case_id = _create_case(client, client_headers)
+  _upload_required_evidence(client, client_headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+  assert client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "lawyer-review"},
+  ).status_code == 200
+
+  no_document_action = client.post(
+    f"/api/v1/cases/{case_id}/lawyer-service/actions",
+    headers=client_headers,
+    json={"action": "mark_sent"},
+  )
+  assert no_document_action.status_code == 409
+  assert no_document_action.json()["detail"] == "APPROVED_LAWYER_LETTER_REQUIRED"
+
+  client_headers_self_service = _register_client(client, phone="13800004321")
+  self_service_case_id = _create_case(client, client_headers_self_service)
+  _upload_required_evidence(client, client_headers_self_service, self_service_case_id)
+  assert client.post(f"/api/v1/cases/{self_service_case_id}/evaluate", headers=client_headers_self_service).status_code == 200
+  assert client.post(
+    f"/api/v1/cases/{self_service_case_id}/plan",
+    headers=client_headers_self_service,
+    json={"planId": "self-service"},
+  ).status_code == 200
+
+  wrong_plan_action = client.post(
+    f"/api/v1/cases/{self_service_case_id}/lawyer-service/actions",
+    headers=client_headers_self_service,
+    json={"action": "mark_sent"},
+  )
+  assert wrong_plan_action.status_code == 409
+  assert wrong_plan_action.json()["detail"] == "LAWYER_SERVICE_REQUIRED"
+
+  approved_client = TestClient(create_app(_test_settings()))
+  approved_headers, _lawyer_headers, approved_case_id, _document = _create_approved_lawyer_letter_case(approved_client)
+  missing_response = approved_client.post(
+    f"/api/v1/cases/{approved_case_id}/lawyer-service/actions",
+    headers=approved_headers,
+    json={"action": "record_response"},
+  )
+  assert missing_response.status_code == 409
+  assert missing_response.json()["detail"] == "RESPONSE_REQUIRED"
 
 
 def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
@@ -1207,6 +1337,57 @@ def _create_approved_lawyer(client: TestClient, phone: str = "13900008888") -> d
   )
   assert response.status_code == 200
   return lawyer_headers
+
+
+def _create_approved_lawyer_letter_case(client: TestClient) -> tuple[dict[str, str], dict[str, str], str, dict]:
+  client_headers = _register_client(client, phone="13800001234")
+  lawyer_headers = _create_approved_lawyer(client)
+  case_id = _create_case(client, client_headers)
+  _upload_required_evidence(client, client_headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+  assert client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "lawyer-review"},
+  ).status_code == 200
+  task = client.get("/api/v1/lawyer/tasks", headers=lawyer_headers).json()["tasks"][0]
+  assert client.post(
+    f"/api/v1/lawyer/tasks/{task['id']}/review",
+    headers=lawyer_headers,
+    json={
+      "conclusion": "材料基本完整，可先发律师函催告。",
+      "riskLevel": "medium",
+      "evidenceGaps": [],
+      "advice": "建议先发送律师函，保留后续诉讼准备。",
+      "nextAction": "draft_lawyer_letter",
+    },
+  ).status_code == 200
+  created_document = client.post(
+    f"/api/v1/lawyer/cases/{case_id}/documents",
+    headers=lawyer_headers,
+    json={
+      "type": "lawyer_letter",
+      "title": "正式催款律师函",
+      "fields": {
+        "recipient": "北京YY贸易有限公司",
+        "request": "请于三日内支付欠款",
+        "deadline": "三日内",
+      },
+      "body": "请贵司收到本函后三日内支付全部欠款及逾期损失。",
+    },
+  )
+  assert created_document.status_code == 201
+  document = created_document.json()["document"]
+  assert client.post(
+    f"/api/v1/lawyer/cases/{case_id}/documents/{document['id']}/submit",
+    headers=lawyer_headers,
+  ).status_code == 200
+  approved_document = client.post(
+    f"/api/v1/cases/{case_id}/documents/{document['id']}/approve",
+    headers=client_headers,
+  )
+  assert approved_document.status_code == 200
+  return client_headers, lawyer_headers, case_id, approved_document.json()["document"]
 
 
 def _create_case(client: TestClient, headers: dict[str, str], case_type: str = "debt_collection") -> str:

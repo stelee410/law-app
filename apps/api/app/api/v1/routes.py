@@ -16,6 +16,7 @@ from app.schemas import (
   ClientRegisterInput,
   CreateCaseInput,
   CreateDocumentInput,
+  LawyerServiceActionInput,
   LawyerOnboardingInput,
   LoginInput,
   PasswordLoginInput,
@@ -407,6 +408,22 @@ def record_self_service_action(
 ):
   try:
     law_case = cases_service.record_self_service_action(store, current_user.id, case_id, payload)
+  except InvalidStateError as exc:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+  if law_case is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CASE_NOT_FOUND")
+  return {"case": law_case}
+
+
+@router.post("/cases/{case_id}/lawyer-service/actions")
+def record_lawyer_service_action(
+  case_id: str,
+  payload: LawyerServiceActionInput,
+  current_user: Annotated[User, Depends(_get_current_user)],
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    law_case = cases_service.record_lawyer_service_action(store, current_user.id, case_id, payload)
   except InvalidStateError as exc:
     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
   if law_case is None:

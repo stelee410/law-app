@@ -56,7 +56,7 @@ export type PlanId = 'self-service' | 'lawyer-review' | 'full-service';
 export type UserRole = 'client' | 'lawyer' | 'admin';
 export type AccountStatus = 'active' | 'disabled';
 export type LawyerReviewStatus = 'none' | 'pending_review' | 'approved' | 'rejected';
-export type WorkItemKind = 'ai_guidance' | 'lawyer_review' | 'document_draft' | 'document_revision';
+export type WorkItemKind = 'ai_guidance' | 'lawyer_review' | 'document_draft' | 'document_revision' | 'lawyer_follow_up';
 export type WorkItemStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 export type RiskLevel = 'low' | 'medium' | 'high';
 export type ReviewNextAction =
@@ -85,6 +85,22 @@ export type SelfServiceResponse =
   | 'no_response'
   | 'need_review'
   | 'completed';
+export type LawyerServiceAction =
+  | 'copy_document'
+  | 'download_document'
+  | 'mark_sent'
+  | 'record_response'
+  | 'request_lawyer_followup'
+  | 'prepare_filing'
+  | 'close_case';
+export type LawyerServiceResponse =
+  | 'paid'
+  | 'completed'
+  | 'promised'
+  | 'installment'
+  | 'mediation_requested'
+  | 'rejected'
+  | 'no_response';
 
 export type ServicePlan = {
   id: PlanId;
@@ -302,6 +318,13 @@ export type SelfServiceActionInput = {
   action: SelfServiceAction;
   channel?: string;
   response?: SelfServiceResponse;
+  note?: string;
+};
+
+export type LawyerServiceActionInput = {
+  action: LawyerServiceAction;
+  channel?: string;
+  response?: LawyerServiceResponse;
   note?: string;
 };
 

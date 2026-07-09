@@ -1,4 +1,4 @@
-from app.schemas import CreateCaseInput, LawCase, PlanId, SelfServiceActionInput
+from app.schemas import CreateCaseInput, LawCase, LawyerServiceActionInput, PlanId, SelfServiceActionInput
 from app.store import AppStore
 
 
@@ -25,3 +25,12 @@ def record_self_service_action(
   input_data: SelfServiceActionInput,
 ) -> LawCase | None:
   return store.record_self_service_action(user_id, case_id, input_data)
+
+
+def record_lawyer_service_action(
+  store: AppStore,
+  user_id: str,
+  case_id: str,
+  input_data: LawyerServiceActionInput,
+) -> LawCase | None:
+  return store.record_lawyer_service_action(user_id, case_id, input_data)

@@ -1,5 +1,5 @@
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime, timedelta
 from secrets import token_urlsafe
 from typing import Any, Protocol
@@ -40,6 +40,7 @@ from app.schemas import (
   EvidenceFile,
   LawCase,
   LawyerOnboardingInput,
+  LawyerServiceActionInput,
   LegalDocument,
   NotificationMessage,
   PlanId,
@@ -131,6 +132,7 @@ class AppStore(Protocol):
   def start_case_assessment(self, user_id: str, case_id: str) -> AssessmentJob | None: ...
   def select_plan(self, user_id: str, case_id: str, plan_id: PlanId) -> LawCase | None: ...
   def record_self_service_action(self, user_id: str, case_id: str, input_data: SelfServiceActionInput) -> LawCase | None: ...
+  def record_lawyer_service_action(self, user_id: str, case_id: str, input_data: LawyerServiceActionInput) -> LawCase | None: ...
   def list_messages(self, user_id: str) -> list[NotificationMessage]: ...
   def mark_message_read(self, user_id: str, message_id: str) -> NotificationMessage | None: ...
   def list_case_work_items(self, user_id: str, case_id: str) -> list[WorkItem] | None: ...
@@ -513,6 +515,28 @@ class InMemoryStore:
     )
     return law_case
 
+  def record_lawyer_service_action(self, user_id: str, case_id: str, input_data: LawyerServiceActionInput) -> LawCase | None:
+    law_case = self.get_case(user_id, case_id)
+    if law_case is None:
+      return None
+    if law_case.selectedPlan != "lawyer-review":
+      raise InvalidStateError("LAWYER_SERVICE_REQUIRED")
+    if not _has_approved_lawyer_letter(law_case, self._documents.values()):
+      raise InvalidStateError("APPROVED_LAWYER_LETTER_REQUIRED")
+    if input_data.action == "record_response" and input_data.response is None:
+      raise InvalidStateError("RESPONSE_REQUIRED")
+
+    completed_at = _format_datetime(_now())
+    title, message, payload = _apply_lawyer_service_action(law_case, input_data, completed_at)
+    if _lawyer_service_needs_follow_up(input_data):
+      task, created = self._upsert_lawyer_follow_up_work_item(law_case, input_data.note)
+      payload["workItemId"] = task.id
+      event_title = "律师协商跟进待办已创建" if created else "律师协商跟进待办已更新"
+      self._record_event(law_case.id, "task.created" if created else "task.updated", event_title, task.summary, {"workItemId": task.id})
+      self._notify_lawyers(event_title, task.summary, f"/lawyer/tasks/{task.id}", law_case.id)
+    self._record_event(law_case.id, "stage.changed", title, message, payload)
+    return law_case
+
   def list_messages(self, user_id: str) -> list[NotificationMessage]:
     messages = [message for message in self._messages.values() if message.recipientUserId == user_id]
     return sorted(messages, key=lambda item: item.createdAt, reverse=True)
@@ -570,13 +594,13 @@ class InMemoryStore:
       law_case.userId or "",
       "document",
       "文书已确认",
-      f"已确认《{document.title}》，平台将同步律师跟进后续处理。",
+      f"已确认《{document.title}》，请下载或复制后自行发送，并保留送达、沟通和签收凭证。",
       f"/cases/{case_id}",
       case_id,
     )
     self._notify_lawyers(
       "用户已确认文书",
-      f"{law_case.debtorName} 已确认 {document.title}。",
+      f"{law_case.debtorName} 已确认 {document.title}，等待客户自行发送并记录对方回应。",
       f"/lawyer/cases/{case_id}/documents/{document_id}",
       case_id,
     )
@@ -939,6 +963,24 @@ class InMemoryStore:
       law_case.id,
     )
     self._notify_lawyers("新的律师复核待办", task.summary, f"/lawyer/tasks/{task.id}", law_case.id)
+
+  def _upsert_lawyer_follow_up_work_item(self, law_case: LawCase, note: str | None = None) -> tuple[WorkItem, bool]:
+    summary = _lawyer_follow_up_summary(law_case, note)
+    existing = next(
+      (
+        item for item in self._work_items.values()
+        if item.caseId == law_case.id and item.kind == "lawyer_follow_up" and item.status in ("pending", "in_progress")
+      ),
+      None,
+    )
+    if existing is not None:
+      existing.status = "pending"
+      existing.summary = summary
+      existing.updatedAt = _iso(_now())
+      return existing, False
+    task = _new_work_item(law_case.id, "lawyer_follow_up", "协商跟进待办", summary, self._first_lawyer_id())
+    self._work_items[task.id] = task
+    return task, True
 
   def _create_message(
     self,
@@ -1484,6 +1526,41 @@ class PostgresStore:
       conn.commit()
     return law_case
 
+  def record_lawyer_service_action(self, user_id: str, case_id: str, input_data: LawyerServiceActionInput) -> LawCase | None:
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute("SELECT * FROM cases WHERE id = %s AND user_id = %s", (case_id, user_id))
+        row = cursor.fetchone()
+        if row is None:
+          conn.rollback()
+          return None
+        law_case = self._case_from_row(cursor, row)
+        if law_case.selectedPlan != "lawyer-review":
+          conn.rollback()
+          raise InvalidStateError("LAWYER_SERVICE_REQUIRED")
+        if not self._has_approved_lawyer_letter(cursor, case_id):
+          conn.rollback()
+          raise InvalidStateError("APPROVED_LAWYER_LETTER_REQUIRED")
+        if input_data.action == "record_response" and input_data.response is None:
+          conn.rollback()
+          raise InvalidStateError("RESPONSE_REQUIRED")
+
+        completed_at = _format_datetime(_now())
+        title, message, payload = _apply_lawyer_service_action(law_case, input_data, completed_at)
+        self._update_case_state(cursor, law_case)
+        if _lawyer_service_needs_follow_up(input_data):
+          task, created = self._upsert_lawyer_follow_up_work_item(cursor, law_case, input_data.note)
+          payload["workItemId"] = task.id
+          event_title = "律师协商跟进待办已创建" if created else "律师协商跟进待办已更新"
+          self._insert_event(
+            cursor,
+            _new_event(law_case.id, "task.created" if created else "task.updated", event_title, task.summary, {"workItemId": task.id}),
+          )
+          self._notify_lawyers(cursor, event_title, task.summary, f"/lawyer/tasks/{task.id}", law_case.id)
+        self._insert_event(cursor, _new_event(law_case.id, "stage.changed", title, message, payload))
+      conn.commit()
+    return law_case
+
   def list_messages(self, user_id: str) -> list[NotificationMessage]:
     with self.database.connection() as conn:
       with conn.cursor(row_factory=dict_row) as cursor:
@@ -1577,7 +1654,7 @@ class PostgresStore:
             law_case.userId or "",
             "document",
             "文书已确认",
-            f"已确认《{document.title}》，平台将同步律师跟进后续处理。",
+            f"已确认《{document.title}》，请下载或复制后自行发送，并保留送达、沟通和签收凭证。",
             f"/cases/{case_id}",
             case_id,
           ),
@@ -1585,7 +1662,7 @@ class PostgresStore:
         self._notify_lawyers(
           cursor,
           "用户已确认文书",
-          f"{law_case.debtorName} 已确认 {document.title}。",
+          f"{law_case.debtorName} 已确认 {document.title}，等待客户自行发送并记录对方回应。",
           f"/lawyer/cases/{case_id}/documents/{document_id}",
           case_id,
         )
@@ -2235,6 +2312,40 @@ class PostgresStore:
     row = cursor.fetchone()
     return row["id"] if row is not None else None
 
+  def _has_approved_lawyer_letter(self, cursor, case_id: str) -> bool:
+    cursor.execute(
+      """
+      SELECT id FROM legal_documents
+      WHERE case_id = %s AND type = 'lawyer_letter' AND status = 'approved'
+      LIMIT 1
+      """,
+      (case_id,),
+    )
+    return cursor.fetchone() is not None
+
+  def _upsert_lawyer_follow_up_work_item(self, cursor, law_case: LawCase, note: str | None = None) -> tuple[WorkItem, bool]:
+    summary = _lawyer_follow_up_summary(law_case, note)
+    cursor.execute(
+      """
+      SELECT * FROM work_items
+      WHERE case_id = %s AND kind = 'lawyer_follow_up' AND status IN ('pending', 'in_progress')
+      ORDER BY created_at ASC
+      LIMIT 1
+      """,
+      (law_case.id,),
+    )
+    row = cursor.fetchone()
+    if row is not None:
+      task = _work_item_from_row(row)
+      task.status = "pending"
+      task.summary = summary
+      task.updatedAt = _iso(_now())
+      self._update_work_item_row(cursor, task)
+      return task, False
+    task = _new_work_item(law_case.id, "lawyer_follow_up", "协商跟进待办", summary, self._first_lawyer_id(cursor))
+    self._insert_work_item(cursor, task)
+    return task, True
+
   def _notify_lawyers(self, cursor, title: str, body: str, action_href: str, case_id: str | None = None) -> None:
     cursor.execute(
       """
@@ -2546,6 +2657,34 @@ def _close_self_service_filing_stage(law_case: LawCase, completed_at: str) -> No
   _set_stage(law_case, "filing", "done", "自助处理已完成，无需继续准备立案材料", completed_at)
 
 
+def _set_lawyer_letter_stage(law_case: LawCase, status: str, description: str, at: str | None = None) -> None:
+  stage = _stage(law_case, "letter")
+  if stage is None:
+    return
+  stage.title = "发送律师函"
+  stage.status = status
+  stage.description = description
+  stage.at = at if status == "done" else None
+
+
+def _set_lawyer_negotiation_stage(law_case: LawCase, status: str, description: str, at: str | None = None) -> None:
+  stage = _stage(law_case, "negotiation")
+  if stage is None:
+    return
+  stage.title = "协商跟进"
+  stage.status = status
+  stage.description = description
+  stage.at = at if status == "done" else None
+
+
+def _complete_lawyer_letter_stage(law_case: LawCase, completed_at: str) -> None:
+  _set_lawyer_letter_stage(law_case, "done", "客户已确认自行发送律师函", completed_at)
+
+
+def _activate_lawyer_negotiation_stage(law_case: LawCase) -> None:
+  _set_lawyer_negotiation_stage(law_case, "active", "等待对方回应；如有承诺、协商请求、无回应或拒绝，请记录结果")
+
+
 def _apply_self_service_action(law_case: LawCase, input_data: SelfServiceActionInput, completed_at: str) -> tuple[str, str, dict[str, Any]]:
   payload = {
     "action": input_data.action,
@@ -2594,6 +2733,77 @@ def _apply_self_service_action(law_case: LawCase, input_data: SelfServiceActionI
     _set_stage(law_case, "filing", "done", "已申请升级人工服务，399 自助处理已交接", completed_at)
     return "已申请升级人工服务", input_data.note or "用户已申请升级人工复核或代办服务。", payload
   return "自助动作已记录", input_data.note or "用户已记录自助处理动作。", payload
+
+
+def _apply_lawyer_service_action(law_case: LawCase, input_data: LawyerServiceActionInput, completed_at: str) -> tuple[str, str, dict[str, Any]]:
+  payload = {
+    "action": input_data.action,
+    "channel": input_data.channel,
+    "response": input_data.response,
+    "note": input_data.note,
+  }
+  if input_data.action == "copy_document":
+    return "已复制律师定稿文书", input_data.note or "客户已复制律师定稿文书，可自行发送并保留送达凭证。", payload
+  if input_data.action == "download_document":
+    return "已下载律师定稿文书", input_data.note or "客户已下载律师定稿文书，可自行发送并保留送达凭证。", payload
+  if input_data.action == "mark_sent":
+    law_case.status = "已记录自行发送，等待对方回应"
+    _complete_lawyer_letter_stage(law_case, completed_at)
+    _activate_lawyer_negotiation_stage(law_case)
+    return "已记录自行发送", input_data.note or "客户确认已自行发送律师定稿文书，等待对方回应。", payload
+  if input_data.action == "record_response":
+    _complete_lawyer_letter_stage(law_case, completed_at)
+    if input_data.response in ("paid", "completed"):
+      law_case.status = "对方已履行，案件可结案"
+      _set_lawyer_negotiation_stage(law_case, "done", "已记录对方履行或事项完成", completed_at)
+      _set_stage(law_case, "filing", "done", "对方已履行，暂不需要准备立案材料", completed_at)
+      _set_stage(law_case, "recovery", "done", "已确认回款或事项完成", completed_at)
+      return "对方已履行", input_data.note or "客户已记录对方履行或事项完成。", payload
+    if input_data.response in ("promised", "installment", "mediation_requested"):
+      law_case.status = "对方承诺履行，律师继续跟进"
+      _activate_lawyer_negotiation_stage(law_case)
+      return "对方回应需律师跟进", input_data.note or "客户已记录对方承诺、分期或协商请求，律师继续跟进。", payload
+    law_case.status = "对方无回应或拒绝，建议准备立案材料"
+    _set_lawyer_negotiation_stage(law_case, "done", "已记录对方无回应或拒绝", completed_at)
+    _set_stage(law_case, "filing", "active", "可整理证据、送达和沟通记录，准备立案材料")
+    return "建议准备立案材料", input_data.note or "客户已记录对方无回应或拒绝，建议进入立案材料准备。", payload
+  if input_data.action == "request_lawyer_followup":
+    law_case.status = "已请求律师继续协商跟进"
+    _complete_lawyer_letter_stage(law_case, completed_at)
+    _activate_lawyer_negotiation_stage(law_case)
+    return "已请求律师继续跟进", input_data.note or "客户已请求律师继续协商跟进。", payload
+  if input_data.action == "prepare_filing":
+    law_case.status = "已进入立案材料准备"
+    _complete_lawyer_letter_stage(law_case, completed_at)
+    _set_lawyer_negotiation_stage(law_case, "done", "客户选择进入立案材料准备", completed_at)
+    _set_stage(law_case, "filing", "active", "整理证据、送达和沟通记录，准备立案材料")
+    return "已进入立案材料准备", input_data.note or "客户已选择进入立案材料准备。", payload
+  if input_data.action == "close_case":
+    law_case.status = "客户已确认结案"
+    _complete_lawyer_letter_stage(law_case, completed_at)
+    _set_lawyer_negotiation_stage(law_case, "done", "客户已确认结案", completed_at)
+    _set_stage(law_case, "filing", "done", "客户已确认结案，无需继续准备材料", completed_at)
+    _set_stage(law_case, "recovery", "done", "客户已确认结案", completed_at)
+    return "客户已确认结案", input_data.note or "客户已确认案件处理完成。", payload
+  return "律师服务动作已记录", input_data.note or "客户已记录律师服务后续动作。", payload
+
+
+def _lawyer_service_needs_follow_up(input_data: LawyerServiceActionInput) -> bool:
+  return input_data.action == "request_lawyer_followup" or (
+    input_data.action == "record_response" and input_data.response in ("promised", "installment", "mediation_requested")
+  )
+
+
+def _lawyer_follow_up_summary(law_case: LawCase, note: str | None = None) -> str:
+  detail = f"客户记录：{note}" if note else "客户记录对方有回应，需要律师继续协商跟进。"
+  return f"跟进 {law_case.debtorName} 律师函发送后的对方回应。{detail}"
+
+
+def _has_approved_lawyer_letter(law_case: LawCase, documents: Iterable[LegalDocument]) -> bool:
+  return any(
+    document.caseId == law_case.id and document.type == "lawyer_letter" and document.status == "approved"
+    for document in documents
+  )
 
 
 def _self_service_work_item_status(input_data: SelfServiceActionInput) -> str:
@@ -2682,10 +2892,17 @@ def _approved_document_status(document_type: str) -> str:
     return "合同审查意见已确认"
   if document_type == "arbitration_material":
     return "仲裁材料已确认"
-  return "律师函已确认"
+  return "律师函已定稿，待客户自行发送"
 
 
 def _mark_stage_for_document(law_case: LawCase, document_type: str) -> None:
+  if document_type == "lawyer_letter":
+    _set_lawyer_letter_stage(law_case, "active", "律师函已定稿，待客户下载或复制后自行发送")
+    stage = _stage(law_case, "negotiation")
+    if stage is not None and stage.status == "todo":
+      stage.title = "协商跟进"
+      stage.description = "客户自行发送后记录对方回应"
+    return
   stage_key = "filing" if document_type == "arbitration_material" else "letter"
   stage = next((item for item in law_case.stages if item.key == stage_key), None)
   if stage is not None:

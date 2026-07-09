@@ -300,6 +300,66 @@ const pendingLawyerDocument = {
   status: 'pending_client_approval'
 };
 
+const approvedLawyerServiceDocument = {
+  ...lawyerDocument,
+  status: 'approved',
+  title: '正式催款律师函',
+  body: '请贵司收到本函后三日内支付全部欠款及逾期损失。'
+};
+
+const approvedLawyerServiceCase = {
+  ...assessedCase,
+  selectedPlan: 'lawyer-review',
+  status: '律师函已定稿，待客户自行发送',
+  stages: [
+    {
+      key: 'submit',
+      title: '提交案件',
+      description: '案件信息已提交。',
+      status: 'done',
+      at: '2026-06-01'
+    },
+    {
+      key: 'evidence',
+      title: '证据收集',
+      description: '已上传关键证据。',
+      status: 'done',
+      at: '2026-06-02'
+    },
+    {
+      key: 'review',
+      title: '律师复核',
+      description: '律师已提交复核意见',
+      status: 'done',
+      at: '2026-06-03'
+    },
+    {
+      key: 'letter',
+      title: '发送律师函',
+      description: '律师函已定稿，待客户下载或复制后自行发送',
+      status: 'active'
+    },
+    {
+      key: 'negotiation',
+      title: '协商跟进',
+      description: '客户自行发送后记录对方回应',
+      status: 'todo'
+    },
+    {
+      key: 'filing',
+      title: '立案材料准备',
+      description: '对方无回应或拒绝后准备立案材料',
+      status: 'todo'
+    },
+    {
+      key: 'recovery',
+      title: '回款 / 结案',
+      description: '回款完成或法院判决后结案',
+      status: 'todo'
+    }
+  ]
+};
+
 const archivedLawyerDocument = {
   ...lawyerDocument,
   status: 'archived',
@@ -1866,6 +1926,149 @@ describe('App', () => {
         action: 'mark_sent',
         channel: '自行发送',
         note: '用户确认已自行发送或使用 AI 自助材料'
+      });
+    });
+  });
+
+  it('renders lawyer finalized document delivery actions for 1499 cases', async () => {
+    const updatedCase = {
+      ...approvedLawyerServiceCase,
+      status: '已记录自行发送，等待对方回应'
+    };
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordLawyerServiceAction: (caseId: string, input: unknown) => Promise<typeof updatedCase> }, 'recordLawyerServiceAction')
+      .mockResolvedValue(updatedCase);
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), approvedLawyerServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), [lawyerTask]);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [approvedLawyerServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('律师定稿文书')).toBeInTheDocument();
+    expect(await screen.findByText('客户自行发送，不是平台代发或律师代发；发送后请保留送达和沟通凭证。')).toBeInTheDocument();
+    expect(await screen.findByText('正式催款律师函')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: /补充送达\/沟通凭证/ })).toHaveAttribute('href', '/cases/case-test/evidence');
+
+    await userEvent.click(await screen.findByRole('button', { name: '我已自行发送' }));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'mark_sent',
+        channel: '自行发送',
+        note: '客户确认已自行发送律师定稿文书'
+      });
+    });
+  });
+
+  it('copies and downloads the lawyer finalized document for 1499 cases', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true
+    });
+    const clickSpy = vi.fn();
+    const appendSpy = vi.spyOn(document.body, 'appendChild');
+    const removeSpy = vi.spyOn(document.body, 'removeChild');
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:lawyer-letter'), configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
+    vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      const element = document.createElementNS('http://www.w3.org/1999/xhtml', tagName) as HTMLElement;
+      if (tagName === 'a') {
+        Object.defineProperty(element, 'click', { value: clickSpy });
+      }
+      return element;
+    });
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordLawyerServiceAction: (caseId: string, input: unknown) => Promise<typeof approvedLawyerServiceCase> }, 'recordLawyerServiceAction')
+      .mockResolvedValue(approvedLawyerServiceCase);
+    const fetchMock = vi.mocked(fetch);
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/api/v1/cases/case-test/documents')) {
+        return jsonResponse({ documents: [approvedLawyerServiceDocument] });
+      }
+      if (url.endsWith('/api/v1/cases/case-test')) {
+        return jsonResponse({ case: approvedLawyerServiceCase });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse({});
+    });
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), approvedLawyerServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), [lawyerTask]);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [approvedLawyerServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '下载定稿文书' }));
+    await userEvent.click(await screen.findByRole('button', { name: '复制定稿文书' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('请贵司收到本函后三日内支付全部欠款及逾期损失。'));
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'copy_document',
+        note: '客户已复制律师定稿文书'
+      });
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'download_document',
+        note: '客户已下载律师定稿文书'
+      });
+    });
+    expect(appendSpy).toHaveBeenCalled();
+    expect(removeSpy).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
+  });
+
+  it('records opponent response from the 1499 negotiation follow-up panel', async () => {
+    const waitingCase = {
+      ...approvedLawyerServiceCase,
+      status: '已记录自行发送，等待对方回应',
+      stages: approvedLawyerServiceCase.stages.map((stage) => {
+        if (stage.key === 'letter') return { ...stage, status: 'done', at: '2026-06-04' };
+        if (stage.key === 'negotiation') return { ...stage, status: 'active', description: '等待对方回应' };
+        return stage;
+      })
+    };
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordLawyerServiceAction: (caseId: string, input: unknown) => Promise<typeof waitingCase> }, 'recordLawyerServiceAction')
+      .mockResolvedValue(waitingCase);
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), waitingCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), [lawyerTask]);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [approvedLawyerServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('发送与回应跟进')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '无回应/拒绝' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '请律师继续跟进' })).toBeInTheDocument();
+
+    await userEvent.click(await screen.findByRole('button', { name: '承诺付款/协商中' }));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'record_response',
+        response: 'promised',
+        note: '客户记录对方承诺付款或要求继续协商'
       });
     });
   });
