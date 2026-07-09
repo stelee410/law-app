@@ -19,10 +19,10 @@ SERVICE_PLANS: list[ServicePlan] = [
   ServicePlan(
     id="self-service",
     name="AI自助版",
-    subtitle="适合预算有限 / 自主操作",
+    subtitle="平台提供 AI 模板和操作指引，用户自行处理",
     price=399,
     fee="一次性服务费",
-    features=["AI生成材料草稿", "复制或下载模板", "自助发送后记录结果"],
+    features=["AI整理材料与风险点", "复制或下载模板，自行发送/使用", "记录凭证、回应和回款结果"],
   ),
   ServicePlan(
     id="lawyer-review",
@@ -31,15 +31,15 @@ SERVICE_PLANS: list[ServicePlan] = [
     price=1499,
     fee="服务费 + 成功费 5%",
     recommended=True,
-    features=["平台律师复核材料", "律师函/合同/仲裁建议", "协商调解支持", "材料准备支持"],
+    features=["平台律师复核材料", "正式函件或专业意见支持", "协商调解支持", "材料准备支持"],
   ),
   ServicePlan(
     id="full-service",
-    name="全程代办版",
-    subtitle="省心省力 / 全程托管",
+    name="诉前全程跟进版",
+    subtitle="律师跟进发送凭证、对方回应和下一步诉前动作",
     price=5999,
     fee="服务费 + 成功费 10%",
-    features=["律师全程代理", "协商调解 + 材料提交", "出庭/仲裁支持（如需）", "履行跟进"],
+    features=["律师签章定稿文书", "客户自行发送后上传凭证", "律师确认凭证并跟进回应", "无回应或拒绝时准备诉讼/仲裁材料"],
   ),
 ]
 

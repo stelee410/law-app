@@ -6,10 +6,10 @@ import { SectionHeader } from '../components/h5/SectionHeader';
 import { Timeline } from '../components/h5/Timeline';
 import { StateBlock } from '../components/StateBlock';
 import { useCaseEvents } from '../hooks/useCaseEvents';
-import { useApproveDocumentMutation, useCaseDocumentsQuery, useCaseQuery, useCaseWorkItemsQuery, useRecordLawyerServiceActionMutation, useRecordSelfServiceActionMutation } from '../hooks/useCaseQueries';
+import { useApproveDocumentMutation, useCaseDocumentsQuery, useCaseQuery, useCaseWorkItemsQuery, useRecordFullServiceActionMutation, useRecordLawyerServiceActionMutation, useRecordSelfServiceActionMutation } from '../hooks/useCaseQueries';
 import { getCaseCatalogItem } from '../lib/caseCatalog';
 import { fileSizeLabel, formatDate, formatMoney } from '../lib/format';
-import type { CaseStage, LawCase, LawyerServiceActionInput, SelfServiceActionInput } from '../lib/types';
+import type { CaseStage, FullServiceActionInput, LawCase, LawyerServiceActionInput, SelfServiceActionInput } from '../lib/types';
 import { deriveLatestProgress, evidenceProgress, stageProgress } from '../lib/viewModel';
 
 export function CaseDetailPage() {
@@ -20,6 +20,7 @@ export function CaseDetailPage() {
   const approveDocument = useApproveDocumentMutation(caseId);
   const recordSelfServiceAction = useRecordSelfServiceActionMutation(caseId);
   const recordLawyerServiceAction = useRecordLawyerServiceActionMutation(caseId);
+  const recordFullServiceAction = useRecordFullServiceActionMutation(caseId);
   const { events, connected } = useCaseEvents(caseId, Boolean(caseQuery.data));
   const lawCase = caseQuery.data;
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<string>>(() => new Set());
@@ -34,6 +35,7 @@ export function CaseDetailPage() {
   const stages = stageProgress(lawCase.stages);
   const isSelfService = lawCase.selectedPlan === 'self-service';
   const isLawyerReview = lawCase.selectedPlan === 'lawyer-review';
+  const isFullService = lawCase.selectedPlan === 'full-service';
   const displayStages = isSelfService
     ? normalizeSelfServiceStages(lawCase.stages)
     : lawCase.stages;
@@ -46,7 +48,7 @@ export function CaseDetailPage() {
   const selfServiceDocuments = isSelfService
     ? documents.filter((document) => document.status === 'approved' && document.fields.source === 'ai_self_service')
     : [];
-  const lawyerServiceDocuments = isLawyerReview
+  const lawyerServiceDocuments = (isLawyerReview || isFullService)
     ? documents.filter((document) => document.status === 'approved' && document.type === 'lawyer_letter')
     : [];
   const missingRequiredEvidence = lawCase.evidence.filter((category) =>
@@ -88,6 +90,10 @@ export function CaseDetailPage() {
   const primaryLawyerServiceBody = primaryLawyerServiceDocument?.body ?? '';
   const selfServiceStep = getSelfServiceStep(displayStages, lawCase.status, lawCase.caseType);
   const lawyerServiceStep = getLawyerServiceStep(displayStages);
+  const sendProofTask = workItems.find((item) => item.kind === 'send_proof_review');
+  const followUpTask = workItems.find((item) => item.kind === 'lawyer_follow_up' && item.status !== 'completed' && item.status !== 'cancelled');
+  const fullServiceStep = getFullServiceStep(displayStages, lawCase.status, sendProofTask?.status, followUpTask?.status);
+  const documentActionPending = isFullService ? recordFullServiceAction.isPending : recordLawyerServiceAction.isPending;
   const isSelfServiceCompleted = isSelfService && selfServiceStep.key === 'completed';
   const selfServiceCopy = getSelfServiceCopy(lawCase.caseType);
   const supportEvidenceLabel = isSelfServiceCompleted ? '补充留存材料' : '补充证据';
@@ -102,6 +108,18 @@ export function CaseDetailPage() {
 
   function recordLawyerAction(input: LawyerServiceActionInput) {
     recordLawyerServiceAction.mutate(input);
+  }
+
+  function recordFullAction(input: FullServiceActionInput) {
+    recordFullServiceAction.mutate(input);
+  }
+
+  function recordDocumentCopyDownload(action: 'copy_document' | 'download_document', note: string) {
+    if (isFullService) {
+      recordFullAction({ action, note });
+    } else {
+      recordLawyerAction({ action, note });
+    }
   }
 
   async function handleCopyTemplate() {
@@ -131,7 +149,7 @@ export function CaseDetailPage() {
     const legacyCopied = copied || copyTextWithLegacySelection(primaryLawyerServiceBody);
     if (legacyCopied) {
       setLawyerServiceNotice('律师定稿文书已复制，请自行发送并保留送达、沟通和签收凭证。');
-      recordLawyerAction({ action: 'copy_document', note: '客户已复制律师定稿文书' });
+      recordDocumentCopyDownload('copy_document', '客户已复制律师定稿文书');
       return;
     }
     setLawyerServiceNotice('当前浏览器限制一键复制，请展开文书后手动复制。');
@@ -141,7 +159,7 @@ export function CaseDetailPage() {
     if (!primaryLawyerServiceDocument || !primaryLawyerServiceBody) return;
     downloadTextFile(`${primaryLawyerServiceDocument.title}.txt`, primaryLawyerServiceBody);
     setLawyerServiceNotice('律师定稿文书 TXT 已生成，请到浏览器下载记录查看。');
-    recordLawyerAction({ action: 'download_document', note: '客户已下载律师定稿文书' });
+    recordDocumentCopyDownload('download_document', '客户已下载律师定稿文书');
   }
 
   return (
@@ -263,33 +281,35 @@ export function CaseDetailPage() {
         </section>
       )}
 
-      {isLawyerReview && primaryLawyerServiceDocument && (
+      {(isLawyerReview || isFullService) && primaryLawyerServiceDocument && (
         <section id="lawyer-service-actions" className="rounded-lg border border-blue-100 bg-white p-4 shadow-sm">
           <SectionHeader
-            title="律师定稿文书"
-            subtitle="客户自行发送，不是平台代发或律师代发；发送后请保留送达和沟通凭证。"
+            title={isFullService ? '5999 诉前全程跟进' : '律师定稿文书'}
+            subtitle={isFullService
+              ? '客户自行发送，上传凭证后由律师确认；确认前不会进入对方回应阶段'
+              : '客户可复制或下载律师定稿文书，自行发送并保留送达和沟通凭证。'}
           />
           <div className="mt-4 rounded-lg bg-slate-50 p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <strong className="block break-words text-base text-slate-950">{primaryLawyerServiceDocument.title}</strong>
-                <p className="mt-1 break-words text-sm leading-6 text-slate-500">{lawyerServiceStep.body}</p>
+                <p className="mt-1 break-words text-sm leading-6 text-slate-500">{isFullService ? fullServiceStep.body : lawyerServiceStep.body}</p>
               </div>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-black ${lawyerServiceStep.key === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
-                {lawyerServiceStep.key === 'completed' ? '已完成' : '当前任务'}
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-black ${(isFullService ? fullServiceStep.key : lawyerServiceStep.key) === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                {(isFullService ? fullServiceStep.key : lawyerServiceStep.key) === 'completed' ? '已完成' : '当前任务'}
               </span>
             </div>
           </div>
           <div className="mt-3 rounded-lg border border-slate-100 bg-white p-3 text-sm leading-6 text-slate-700">
             <p className="line-clamp-4 break-words whitespace-pre-line">{primaryLawyerServiceBody}</p>
           </div>
-          {lawyerServiceStep.key === 'prepare' && (
+          {isLawyerReview && (
             <div className="mt-3 space-y-2">
               <div className="grid grid-cols-2 gap-2">
                 <button
                   className="flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-100 px-2 text-sm font-black text-slate-700 disabled:opacity-50"
                   type="button"
-                  disabled={recordLawyerServiceAction.isPending}
+                  disabled={documentActionPending}
                   onClick={() => void handleCopyLawyerDocument()}
                 >
                   <ClipboardCopy size={16} />
@@ -298,85 +318,119 @@ export function CaseDetailPage() {
                 <button
                   className="flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-100 px-2 text-sm font-black text-slate-700 disabled:opacity-50"
                   type="button"
-                  disabled={recordLawyerServiceAction.isPending}
+                  disabled={documentActionPending}
                   onClick={handleDownloadLawyerDocument}
                 >
                   <Download size={16} />
                   下载定稿文书
                 </button>
               </div>
-              <button
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-2 text-sm font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50"
-                type="button"
-                disabled={recordLawyerServiceAction.isPending}
-                onClick={() => recordLawyerAction({ action: 'mark_sent', channel: '自行发送', note: '客户确认已自行发送律师定稿文书' })}
-              >
-                <Send size={16} />
-                我已自行发送
-              </button>
+              <p className="rounded-lg bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-800">
+                1499 先交付律师定稿文书；发送、送达和后续协商记录由客户自行留存。
+              </p>
             </div>
           )}
-          {lawyerServiceStep.key === 'waiting' && (
-            <div className="mt-3 space-y-2">
-              <strong className="block text-sm text-slate-950">发送与回应跟进</strong>
+          {isFullService && (
+            <div className="mt-3 space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  className="flex h-11 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-2 text-sm font-black text-white disabled:opacity-50"
+                  className="flex h-12 items-center justify-center gap-2 rounded-lg bg-slate-100 px-2 text-sm font-black text-slate-700 disabled:opacity-50"
                   type="button"
-                  disabled={recordLawyerServiceAction.isPending}
-                  onClick={() => recordLawyerAction({ action: 'record_response', response: 'paid', note: '客户确认对方已履行或事项已完成' })}
+                  disabled={documentActionPending}
+                  onClick={() => void handleCopyLawyerDocument()}
                 >
-                  <CheckCircle2 size={16} />
-                  已履行/已完成
+                  <ClipboardCopy size={16} />
+                  复制文书
                 </button>
                 <button
-                  className="flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-50 px-2 text-sm font-black text-blue-800 disabled:opacity-50"
+                  className="flex h-12 items-center justify-center gap-2 rounded-lg bg-slate-100 px-2 text-sm font-black text-slate-700 disabled:opacity-50"
                   type="button"
-                  disabled={recordLawyerServiceAction.isPending}
-                  onClick={() => recordLawyerAction({ action: 'record_response', response: 'promised', note: '客户记录对方承诺付款或要求继续协商' })}
+                  disabled={documentActionPending}
+                  onClick={handleDownloadLawyerDocument}
                 >
-                  承诺付款/协商中
-                </button>
-                <button
-                  className="flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-50 px-2 text-sm font-black text-amber-800 disabled:opacity-50"
-                  type="button"
-                  disabled={recordLawyerServiceAction.isPending}
-                  onClick={() => recordLawyerAction({ action: 'record_response', response: 'no_response', note: '客户记录对方无回应或拒绝处理' })}
-                >
-                  无回应/拒绝
-                </button>
-                <button
-                  className="flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-900 px-2 text-sm font-black text-white disabled:opacity-50"
-                  type="button"
-                  disabled={recordLawyerServiceAction.isPending}
-                  onClick={() => recordLawyerAction({ action: 'request_lawyer_followup', note: '客户请求律师继续协商跟进' })}
-                >
-                  请律师继续跟进
+                  <Download size={16} />
+                  下载文书
                 </button>
               </div>
+              {fullServiceStep.key === 'prepare' && (
+                <div className="space-y-2">
+                  <Link to="/cases/$caseId/evidence" params={{ caseId }} className="flex h-12 items-center justify-center gap-2 rounded-lg bg-blue-50 px-3 text-sm font-black text-blue-800">
+                    <FileCheck2 size={16} />
+                    上传发送凭证
+                  </Link>
+                  <button
+                    className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50"
+                    type="button"
+                    disabled={recordFullServiceAction.isPending}
+                    onClick={() => recordFullAction({ action: 'submit_send_proof', channel: '客户自行发送', note: '客户已自行发送律师定稿文书并提交发送凭证' })}
+                  >
+                    <Send size={16} />
+                    提交凭证给律师确认
+                  </button>
+                </div>
+              )}
+              {fullServiceStep.key === 'proof_pending' && (
+                <div className="rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm font-semibold leading-6 text-amber-800">
+                  已收到发送凭证，等待律师确认。律师确认前不会开放“记录对方回应”，避免没有送达留痕就进入协商阶段。
+                </div>
+              )}
+              {fullServiceStep.key === 'follow_up' && (
+                <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm font-semibold leading-6 text-blue-800">
+                  已记录对方回应，等待律师判断下一步。律师会根据付款、承诺、拒绝或无回应决定继续协商、结案或准备诉讼/仲裁材料。
+                </div>
+              )}
+              {fullServiceStep.key === 'response' && (
+                <div className="space-y-2">
+                  <strong className="block text-sm text-slate-950">记录对方回应</strong>
+                  <button
+                    className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 text-sm font-black text-white disabled:opacity-50"
+                    type="button"
+                    disabled={recordFullServiceAction.isPending}
+                    onClick={() => recordFullAction({ action: 'record_response', response: 'paid', note: '客户确认对方已履行或事项已完成' })}
+                  >
+                    <CheckCircle2 size={16} />
+                    对方已履行或已完成
+                  </button>
+                  <button
+                    className="flex h-12 w-full items-center justify-center rounded-lg bg-blue-50 px-3 text-sm font-black text-blue-800 disabled:opacity-50"
+                    type="button"
+                    disabled={recordFullServiceAction.isPending}
+                    onClick={() => recordFullAction({ action: 'record_response', response: 'promised', note: '客户记录对方承诺付款、分期或希望继续协商' })}
+                  >
+                    承诺付款 / 分期 / 希望协商
+                  </button>
+                  <button
+                    className="flex h-12 w-full items-center justify-center rounded-lg bg-amber-50 px-3 text-sm font-black text-amber-800 disabled:opacity-50"
+                    type="button"
+                    disabled={recordFullServiceAction.isPending}
+                    onClick={() => recordFullAction({ action: 'record_response', response: 'no_response', note: '客户记录对方无回应' })}
+                  >
+                    对方无回应
+                  </button>
+                  <button
+                    className="flex h-12 w-full items-center justify-center rounded-lg bg-slate-900 px-3 text-sm font-black text-white disabled:opacity-50"
+                    type="button"
+                    disabled={recordFullServiceAction.isPending}
+                    onClick={() => recordFullAction({ action: 'record_response', response: 'rejected', note: '客户记录对方拒绝处理' })}
+                  >
+                    对方拒绝处理
+                  </button>
+                </div>
+              )}
+              {fullServiceStep.key === 'filing' && (
+                <div className="rounded-lg bg-slate-900 p-3 text-sm font-semibold leading-6 text-white">
+                  已进入材料准备阶段。请继续补充发送凭证、沟通记录、付款或拒绝处理材料，律师将用于后续诉讼/仲裁准备。
+                </div>
+              )}
             </div>
           )}
-          {lawyerServiceStep.key === 'filing' && (
-            <button
-              className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-2 text-sm font-black text-white disabled:opacity-50"
-              type="button"
-              disabled={recordLawyerServiceAction.isPending}
-              onClick={() => recordLawyerAction({ action: 'prepare_filing', note: '客户选择进入立案材料准备' })}
-            >
-              准备立案材料
-            </button>
-          )}
-          <Link to="/cases/$caseId/evidence" params={{ caseId }} className="mt-3 flex items-center justify-between rounded-lg bg-blue-50 px-3 py-2 text-sm font-black text-blue-800">
-            补充送达/沟通凭证
-            <ChevronRight size={17} />
-          </Link>
           <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-800">
-            当前仅记录客户自行发送和对方回应；是否产生送达、时效或证据效果，以实际发送方式、到达证明和留存材料为准。
+            当前仅记录客户自行发送、律师确认凭证和对方回应；是否产生送达、时效或证据效果，以实际发送方式、到达证明和留存材料为准。
           </p>
           {lawyerServiceNotice && (
             <p className="mt-3 rounded-lg bg-blue-50 p-3 text-sm font-semibold leading-5 text-blue-700">{lawyerServiceNotice}</p>
           )}
-          {recordLawyerServiceAction.isError && (
+          {(recordLawyerServiceAction.isError || recordFullServiceAction.isError) && (
             <p className="mt-2 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">律师服务进度记录失败，请稍后重试。</p>
           )}
         </section>
@@ -832,6 +886,12 @@ type LawyerServiceStep = {
   body: string;
 };
 
+type FullServiceStep = {
+  key: 'prepare' | 'proof_pending' | 'response' | 'follow_up' | 'filing' | 'completed';
+  title: string;
+  body: string;
+};
+
 function getSelfServiceCopy(caseType: LawCase['caseType']) {
   if (caseType === 'debt_collection') {
     return {
@@ -915,6 +975,57 @@ function getLawyerServiceStep(stages: CaseStage[]): LawyerServiceStep {
   return {
     key: 'completed',
     title: '律师服务处理已完成',
+    body: '已记录履行、回款或结案结果；建议继续保存文书、送达和沟通材料。'
+  };
+}
+
+function getFullServiceStep(
+  stages: CaseStage[],
+  caseStatus: string,
+  sendProofStatus?: string,
+  followUpStatus?: string
+): FullServiceStep {
+  if (sendProofStatus === 'pending' || sendProofStatus === 'in_progress' || caseStatus === '发送凭证待律师确认') {
+    return {
+      key: 'proof_pending',
+      title: '等待律师确认发送凭证',
+      body: '客户已自行发送并提交凭证；律师确认后，才会进入对方回应记录阶段。'
+    };
+  }
+  if (followUpStatus === 'pending' || followUpStatus === 'in_progress' || caseStatus === '已记录对方回应，待律师跟进') {
+    return {
+      key: 'follow_up',
+      title: '等待律师判断下一步',
+      body: '对方回应已记录，律师将判断继续协商、结案或准备诉讼/仲裁材料。'
+    };
+  }
+  const activeStage = stages.find((stage) => stage.status === 'active');
+  if (activeStage?.key === 'letter') {
+    return {
+      key: 'prepare',
+      title: caseStatus === '发送凭证需补充' ? '补充发送凭证' : '自行发送并提交凭证',
+      body: caseStatus === '发送凭证需补充'
+        ? '律师未确认当前凭证，请补充发送截图、快递单号、签收记录或沟通留痕后重新提交。'
+        : '复制或下载律师定稿文书，自行发送后上传发送凭证，再提交给律师确认。'
+    };
+  }
+  if (activeStage?.key === 'negotiation') {
+    return {
+      key: 'response',
+      title: '记录对方回应',
+      body: '律师已确认发送凭证。请根据对方付款、承诺、拒绝或无回应记录结果，后续由律师判断下一步。'
+    };
+  }
+  if (activeStage?.key === 'filing') {
+    return {
+      key: 'filing',
+      title: '材料准备',
+      body: '律师已判断进入诉讼/仲裁材料准备，请继续补充送达、沟通、付款或拒绝处理等凭证。'
+    };
+  }
+  return {
+    key: 'completed',
+    title: '全程跟进已完成',
     body: '已记录履行、回款或结案结果；建议继续保存文书、送达和沟通材料。'
   };
 }

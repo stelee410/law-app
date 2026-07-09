@@ -9,7 +9,9 @@ import type {
   ClientRegisterInput,
   CreateDocumentInput,
   CreateCaseInput,
+  FullServiceActionInput,
   HealthResponse,
+  LawyerFullServiceActionInput,
   LawyerServiceActionInput,
   LawyerOnboardingInput,
   LegalDocument,
@@ -169,6 +171,20 @@ export async function recordSelfServiceAction(caseId: string, input: SelfService
 export async function recordLawyerServiceAction(caseId: string, input: LawyerServiceActionInput): Promise<LawCase> {
   const response = await api
     .post(apiUrl(`/cases/${caseId}/lawyer-service/actions`), { json: input })
+    .json<{ case: LawCase }>();
+  return response.case;
+}
+
+export async function recordFullServiceAction(caseId: string, input: FullServiceActionInput): Promise<LawCase> {
+  const response = await api
+    .post(apiUrl(`/cases/${caseId}/full-service/actions`), { json: input })
+    .json<{ case: LawCase }>();
+  return response.case;
+}
+
+export async function recordLawyerFullServiceAction(caseId: string, input: LawyerFullServiceActionInput): Promise<LawCase> {
+  const response = await api
+    .post(apiUrl(`/lawyer/cases/${caseId}/full-service/actions`), { json: input })
     .json<{ case: LawCase }>();
   return response.case;
 }

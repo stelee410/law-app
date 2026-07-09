@@ -10,7 +10,7 @@ PlanId = Literal["self-service", "lawyer-review", "full-service"]
 UserRole = Literal["client", "lawyer", "admin"]
 AccountStatus = Literal["active", "disabled"]
 LawyerReviewStatus = Literal["none", "pending_review", "approved", "rejected"]
-WorkItemKind = Literal["ai_guidance", "lawyer_review", "document_draft", "document_revision", "lawyer_follow_up"]
+WorkItemKind = Literal["ai_guidance", "lawyer_review", "document_draft", "document_revision", "send_proof_review", "lawyer_follow_up"]
 WorkItemStatus = Literal["pending", "in_progress", "completed", "cancelled"]
 RiskLevel = Literal["low", "medium", "high"]
 ReviewNextAction = Literal[
@@ -60,6 +60,31 @@ LawyerServiceResponse = Literal[
   "rejected",
   "no_response",
 ]
+FullServiceAction = Literal[
+  "copy_document",
+  "download_document",
+  "submit_send_proof",
+  "record_response",
+  "close_case",
+]
+FullServiceResponse = Literal[
+  "paid",
+  "completed",
+  "promised",
+  "installment",
+  "mediation_requested",
+  "rejected",
+  "no_response",
+  "delivery_failed",
+]
+LawyerFullServiceAction = Literal[
+  "confirm_send_proof",
+  "reject_send_proof",
+  "decide_response",
+  "prepare_filing",
+  "close_case",
+]
+LawyerFullServiceDecision = FullServiceResponse
 CaseStageKey = Literal[
   "submit",
   "evidence",
@@ -93,10 +118,16 @@ ErrorCode = Literal[
   "INTERNAL_ERROR",
   "USER_NOT_FOUND",
   "ACCOUNT_DISABLED",
+  "APPROVED_LAWYER_LETTER_REQUIRED",
+  "DECISION_REQUIRED",
+  "FULL_SERVICE_REQUIRED",
   "LAWYER_NOT_APPROVED",
   "LAWYER_REJECTED",
   "FORBIDDEN",
   "LAST_ADMIN_REQUIRED",
+  "RESPONSE_REQUIRED",
+  "SEND_PROOF_CONFIRMATION_REQUIRED",
+  "SEND_PROOF_REQUIRED",
 ]
 
 
@@ -383,6 +414,19 @@ class LawyerServiceActionInput(ApiModel):
   action: LawyerServiceAction
   channel: str | None = None
   response: LawyerServiceResponse | None = None
+  note: str | None = None
+
+
+class FullServiceActionInput(ApiModel):
+  action: FullServiceAction
+  channel: str | None = None
+  response: FullServiceResponse | None = None
+  note: str | None = None
+
+
+class LawyerFullServiceActionInput(ApiModel):
+  action: LawyerFullServiceAction
+  decision: LawyerFullServiceDecision | None = None
   note: str | None = None
 
 

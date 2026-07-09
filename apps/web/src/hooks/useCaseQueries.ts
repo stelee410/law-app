@@ -22,6 +22,8 @@ import {
   loginWithPassword,
   markMessageRead,
   onboardLawyer,
+  recordFullServiceAction,
+  recordLawyerFullServiceAction,
   recordLawyerServiceAction,
   recordSelfServiceAction,
   requestLoginCode,
@@ -40,7 +42,9 @@ import type {
   ClientRegisterInput,
   CreateDocumentInput,
   CreateCaseInput,
+  FullServiceActionInput,
   LawCase,
+  LawyerFullServiceActionInput,
   LawyerServiceActionInput,
   LawyerOnboardingInput,
   PasswordLoginInput,
@@ -335,6 +339,36 @@ export function useRecordLawyerServiceActionMutation(caseId: string) {
         queryClient.invalidateQueries({ queryKey: caseKeys.lists }),
         queryClient.invalidateQueries({ queryKey: caseKeys.workItems(caseId) }),
         queryClient.invalidateQueries({ queryKey: caseKeys.documents(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.messages })
+      ]);
+    }
+  });
+}
+
+export function useRecordFullServiceActionMutation(caseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: FullServiceActionInput) => recordFullServiceAction(caseId, input),
+    onSuccess: async (lawCase) => {
+      queryClient.setQueryData(caseKeys.detail(caseId), lawCase);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: caseKeys.lists }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.workItems(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.documents(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.messages })
+      ]);
+    }
+  });
+}
+
+export function useRecordLawyerFullServiceActionMutation(caseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: LawyerFullServiceActionInput) => recordLawyerFullServiceAction(caseId, input),
+    onSuccess: async (lawCase) => {
+      queryClient.setQueryData(caseKeys.detail(caseId), lawCase);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: caseKeys.lawyerTasks }),
         queryClient.invalidateQueries({ queryKey: caseKeys.messages })
       ]);
     }

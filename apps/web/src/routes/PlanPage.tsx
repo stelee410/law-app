@@ -38,8 +38,17 @@ export function PlanPage() {
       <header>
         <p className="text-sm font-bold text-blue-700">服务方案 · {catalog.label}</p>
         <h1 className="mt-1 text-2xl font-black tracking-normal">选择案件闭环路径</h1>
-        <p className="mt-2 text-sm leading-6 text-slate-500">基于案件金额、证据完整度和回款目标推荐服务方案。</p>
+        <p className="mt-2 text-sm leading-6 text-slate-500">先看服务内容和边界，再按预算与处理深度选择对应费用。</p>
       </header>
+
+      <section className="rounded-lg border border-blue-100 bg-white p-4 shadow-sm">
+        <SectionHeader title="我们提供什么" subtitle="399、1499、5999 是三条不同服务路径，不互相混用" />
+        <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+          <p><b className="text-slate-950">399 AI自助版：</b>平台生成模板和指引，用户自行发送/使用，并记录凭证、回应和结案结果。</p>
+          <p><b className="text-slate-950">1499 律师复核版：</b>进入人工/律师复核，支持正式函件或专业意见、协商建议和材料准备。</p>
+          <p><b className="text-slate-950">5999 诉前全程跟进版：</b>律师签章定稿后，客户自行发送并提交凭证；律师确认凭证、跟进对方回应，并按结果决定继续协商、结案或准备诉讼/仲裁材料。</p>
+        </div>
+      </section>
 
       {plans.length === 0 && (
         <section className="rounded-lg border border-slate-100 bg-white p-5 text-center shadow-sm">
@@ -52,12 +61,13 @@ export function PlanPage() {
       )}
 
       <section className="space-y-3">
-        {plans.length > 0 && <SectionHeader title="为你推荐最佳方案" subtitle="可先选择轻量服务，后续按进度升级" />}
+        {plans.length > 0 && <SectionHeader title="服务费用" subtitle="确认后按所选方案生成对应待办；演示环境不进入真实支付" />}
         {plans.map((plan) => (
           <PlanCard
             key={plan.id}
             plan={plan}
             selected={lawCase.selectedPlan === plan.id}
+            active={pendingPlanId === plan.id}
             locked={planLocked}
             pending={selectPlan.isPending}
             onSelect={() => setPendingPlanId(plan.id)}
@@ -70,11 +80,11 @@ export function PlanPage() {
         <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-semibold text-slate-700">
           <span className="flex items-center gap-2 rounded-lg bg-blue-50 p-3 text-blue-700">
             <BadgeCheck size={18} />
-            人工复核
+            分层服务
           </span>
           <span className="flex items-center gap-2 rounded-lg bg-emerald-50 p-3 text-emerald-700">
             <Headphones size={18} />
-            服务方跟进
+            边界清晰
           </span>
           <span className="flex items-center gap-2 rounded-lg bg-slate-50 p-3">
             <ShieldCheck size={18} />

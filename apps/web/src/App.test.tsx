@@ -187,11 +187,11 @@ const assessedCase = {
       },
       {
         id: 'full-service',
-        name: '全程代办版',
-        subtitle: '省心省力 / 全程托管',
+        name: '诉前全程跟进版',
+        subtitle: '律师跟进发送凭证、对方回应和下一步诉前动作',
         price: 5999,
         fee: '固定费 + 成功费 10%',
-        features: ['律师全程代理', '协商调解和材料提交']
+        features: ['律师签章定稿文书', '客户自行发送后上传凭证', '律师确认凭证并跟进回应']
       }
     ]
   }
@@ -358,6 +358,74 @@ const approvedLawyerServiceCase = {
       status: 'todo'
     }
   ]
+};
+
+const approvedFullServiceCase = {
+  ...approvedLawyerServiceCase,
+  selectedPlan: 'full-service',
+  stages: approvedLawyerServiceCase.stages.map((stage) => {
+    if (stage.key === 'letter') {
+      return {
+        ...stage,
+        description: '律师函已定稿，待客户自行发送并提交发送凭证',
+        status: 'active'
+      };
+    }
+    if (stage.key === 'negotiation') {
+      return {
+        ...stage,
+        description: '律师确认发送凭证后进入对方回应阶段',
+        status: 'todo'
+      };
+    }
+    return stage;
+  })
+};
+
+const pendingSendProofTask = {
+  id: 'task-send-proof',
+  caseId: 'case-test',
+  kind: 'send_proof_review',
+  status: 'pending',
+  assigneeId: 'lawyer-test',
+  title: '发送凭证确认待办',
+  summary: '确认测试债务人有限公司律师函发送凭证。客户记录：已提交微信发送截图。',
+  dueAt: '2026-06-30T00:00:00.000Z',
+  createdAt: '2026-06-29T00:00:00.000Z',
+  updatedAt: '2026-06-29T00:00:00.000Z'
+};
+
+const pendingFollowUpTask = {
+  id: 'task-follow-up',
+  caseId: 'case-test',
+  kind: 'lawyer_follow_up',
+  status: 'pending',
+  assigneeId: 'lawyer-test',
+  title: '对方回应处理待办',
+  summary: '处理测试债务人有限公司律师函发送后的对方回应（no_response）。客户记录：七日内未回复。',
+  dueAt: '2026-06-30T00:00:00.000Z',
+  createdAt: '2026-06-29T00:00:00.000Z',
+  updatedAt: '2026-06-29T00:00:00.000Z'
+};
+
+const sendProofPendingCase = {
+  ...approvedFullServiceCase,
+  status: '发送凭证待律师确认',
+  stages: approvedFullServiceCase.stages.map((stage) =>
+    stage.key === 'letter'
+      ? { ...stage, description: '客户已提交发送凭证，待律师确认后进入对方回应阶段', status: 'active' }
+      : stage
+  )
+};
+
+const sendProofConfirmedCase = {
+  ...approvedFullServiceCase,
+  status: '发送凭证已确认，等待对方回应',
+  stages: approvedFullServiceCase.stages.map((stage) => {
+    if (stage.key === 'letter') return { ...stage, status: 'done', at: '2026-06-04' };
+    if (stage.key === 'negotiation') return { ...stage, description: '等待对方回应，客户可记录付款、承诺、拒绝或无回应', status: 'active' };
+    return stage;
+  })
 };
 
 const archivedLawyerDocument = {
@@ -1551,6 +1619,68 @@ describe('App', () => {
     expect(await screen.findByText('律师复核待办')).toBeInTheDocument();
   });
 
+  it('renders send proof review task and lets lawyer confirm proof', async () => {
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordLawyerFullServiceAction: (caseId: string, input: unknown) => Promise<typeof sendProofConfirmedCase> }, 'recordLawyerFullServiceAction')
+      .mockResolvedValue(sendProofConfirmedCase);
+    useAuthStore.getState().setSession({
+      token: 'lawyer-token',
+      user: testLawyer,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testLawyer);
+    queryClient.setQueryData(caseKeys.lawyerTask('task-send-proof'), { task: pendingSendProofTask, case: sendProofPendingCase });
+    queryClient.setQueryData(caseKeys.lawyerDocuments('case-test'), []);
+    await router.navigate({ to: '/lawyer/tasks/$taskId', params: { taskId: 'task-send-proof' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('确认发送凭证')).toBeInTheDocument();
+    await userEvent.type(await screen.findByPlaceholderText('填写核对意见，例如：已核对微信截图、收函主体和发送时间'), '已核对微信截图');
+    await userEvent.click(await screen.findByRole('button', { name: '确认已收到发送凭证' }));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'confirm_send_proof',
+        note: '已核对微信截图'
+      });
+    });
+  });
+
+  it('renders lawyer follow-up task and submits a response decision', async () => {
+    const decidedCase = {
+      ...sendProofConfirmedCase,
+      status: '对方无回应或拒绝，进入立案材料准备'
+    };
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordLawyerFullServiceAction: (caseId: string, input: unknown) => Promise<typeof decidedCase> }, 'recordLawyerFullServiceAction')
+      .mockResolvedValue(decidedCase);
+    useAuthStore.getState().setSession({
+      token: 'lawyer-token',
+      user: testLawyer,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testLawyer);
+    queryClient.setQueryData(caseKeys.lawyerTask('task-follow-up'), { task: pendingFollowUpTask, case: sendProofConfirmedCase });
+    queryClient.setQueryData(caseKeys.lawyerDocuments('case-test'), []);
+    await router.navigate({ to: '/lawyer/tasks/$taskId', params: { taskId: 'task-follow-up' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('处理对方回应')).toBeInTheDocument();
+    await userEvent.selectOptions(await screen.findByRole('combobox'), 'no_response');
+    await userEvent.type(await screen.findByPlaceholderText('填写律师跟进意见'), '七日无回应，准备材料');
+    await userEvent.click(await screen.findByRole('button', { name: '提交律师判断' }));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'decide_response',
+        decision: 'no_response',
+        note: '七日无回应，准备材料'
+      });
+    });
+  });
+
   it('renders role-aware profile return action for lawyers', async () => {
     useAuthStore.getState().setSession({
       token: 'lawyer-token',
@@ -1930,14 +2060,7 @@ describe('App', () => {
     });
   });
 
-  it('renders lawyer finalized document delivery actions for 1499 cases', async () => {
-    const updatedCase = {
-      ...approvedLawyerServiceCase,
-      status: '已记录自行发送，等待对方回应'
-    };
-    const recordSpy = vi
-      .spyOn(apiModule as unknown as { recordLawyerServiceAction: (caseId: string, input: unknown) => Promise<typeof updatedCase> }, 'recordLawyerServiceAction')
-      .mockResolvedValue(updatedCase);
+  it('renders lawyer finalized document copy actions for 1499 cases without full-service follow-up controls', async () => {
     useAuthStore.getState().setSession({
       token: 'test-token',
       user: testUser,
@@ -1952,19 +2075,12 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText('律师定稿文书')).toBeInTheDocument();
-    expect(await screen.findByText('客户自行发送，不是平台代发或律师代发；发送后请保留送达和沟通凭证。')).toBeInTheDocument();
+    expect(await screen.findByText('客户可复制或下载律师定稿文书，自行发送并保留送达和沟通凭证。')).toBeInTheDocument();
     expect(await screen.findByText('正式催款律师函')).toBeInTheDocument();
-    expect(await screen.findByRole('link', { name: /补充送达\/沟通凭证/ })).toHaveAttribute('href', '/cases/case-test/evidence');
-
-    await userEvent.click(await screen.findByRole('button', { name: '我已自行发送' }));
-
-    await waitFor(() => {
-      expect(recordSpy).toHaveBeenCalledWith('case-test', {
-        action: 'mark_sent',
-        channel: '自行发送',
-        note: '客户确认已自行发送律师定稿文书'
-      });
-    });
+    expect(await screen.findByRole('button', { name: '复制定稿文书' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '下载定稿文书' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '我已自行发送' })).not.toBeInTheDocument();
+    expect(screen.queryByText('记录对方回应')).not.toBeInTheDocument();
   });
 
   it('copies and downloads the lawyer finalized document for 1499 cases', async () => {
@@ -2032,43 +2148,89 @@ describe('App', () => {
     expect(clickSpy).toHaveBeenCalled();
   });
 
-  it('records opponent response from the 1499 negotiation follow-up panel', async () => {
-    const waitingCase = {
-      ...approvedLawyerServiceCase,
-      status: '已记录自行发送，等待对方回应',
-      stages: approvedLawyerServiceCase.stages.map((stage) => {
-        if (stage.key === 'letter') return { ...stage, status: 'done', at: '2026-06-04' };
-        if (stage.key === 'negotiation') return { ...stage, status: 'active', description: '等待对方回应' };
-        return stage;
-      })
+  it('submits 5999 send proof and waits for lawyer confirmation before showing response actions', async () => {
+    const updatedCase = {
+      ...sendProofPendingCase
     };
     const recordSpy = vi
-      .spyOn(apiModule as unknown as { recordLawyerServiceAction: (caseId: string, input: unknown) => Promise<typeof waitingCase> }, 'recordLawyerServiceAction')
-      .mockResolvedValue(waitingCase);
+      .spyOn(apiModule as unknown as { recordFullServiceAction: (caseId: string, input: unknown) => Promise<typeof updatedCase> }, 'recordFullServiceAction')
+      .mockResolvedValue(updatedCase);
     useAuthStore.getState().setSession({
       token: 'test-token',
       user: testUser,
       expiresAt: '2026-07-30T00:00:00.000Z'
     });
     queryClient.setQueryData(caseKeys.me, testUser);
-    queryClient.setQueryData(caseKeys.detail('case-test'), waitingCase);
-    queryClient.setQueryData(caseKeys.workItems('case-test'), [lawyerTask]);
+    queryClient.setQueryData(caseKeys.detail('case-test'), approvedFullServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), []);
     queryClient.setQueryData(caseKeys.documents('case-test'), [approvedLawyerServiceDocument]);
     await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
 
     render(<App />);
 
-    expect(await screen.findByText('发送与回应跟进')).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: '无回应/拒绝' })).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: '请律师继续跟进' })).toBeInTheDocument();
+    expect(await screen.findByText('5999 诉前全程跟进')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '上传发送凭证' })).toHaveAttribute('href', '/cases/case-test/evidence');
+    expect(screen.queryByText('记录对方回应')).not.toBeInTheDocument();
 
-    await userEvent.click(await screen.findByRole('button', { name: '承诺付款/协商中' }));
+    await userEvent.click(await screen.findByRole('button', { name: '提交凭证给律师确认' }));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'submit_send_proof',
+        channel: '客户自行发送',
+        note: '客户已自行发送律师定稿文书并提交发送凭证'
+      });
+    });
+  });
+
+  it('hides 5999 response actions while send proof is pending lawyer confirmation', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), sendProofPendingCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), [pendingSendProofTask]);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [approvedLawyerServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('已收到发送凭证，等待律师确认。律师确认前不会开放“记录对方回应”，避免没有送达留痕就进入协商阶段。')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '对方已履行或已完成' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '承诺付款 / 分期 / 希望协商' })).not.toBeInTheDocument();
+  });
+
+  it('records 5999 opponent response only after lawyer confirms send proof', async () => {
+    const updatedCase = {
+      ...sendProofConfirmedCase,
+      status: '已记录对方回应，待律师跟进'
+    };
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordFullServiceAction: (caseId: string, input: unknown) => Promise<typeof updatedCase> }, 'recordFullServiceAction')
+      .mockResolvedValue(updatedCase);
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), sendProofConfirmedCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), [{ ...pendingSendProofTask, status: 'completed' }]);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [approvedLawyerServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect(await screen.findByText('记录对方回应')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: '承诺付款 / 分期 / 希望协商' }));
 
     await waitFor(() => {
       expect(recordSpy).toHaveBeenCalledWith('case-test', {
         action: 'record_response',
         response: 'promised',
-        note: '客户记录对方承诺付款或要求继续协商'
+        note: '客户记录对方承诺付款、分期或希望继续协商'
       });
     });
   });

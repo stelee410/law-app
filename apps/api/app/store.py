@@ -38,7 +38,9 @@ from app.schemas import (
   CreateDocumentInput,
   EvidenceCategory,
   EvidenceFile,
+  FullServiceActionInput,
   LawCase,
+  LawyerFullServiceActionInput,
   LawyerOnboardingInput,
   LawyerServiceActionInput,
   LegalDocument,
@@ -133,6 +135,8 @@ class AppStore(Protocol):
   def select_plan(self, user_id: str, case_id: str, plan_id: PlanId) -> LawCase | None: ...
   def record_self_service_action(self, user_id: str, case_id: str, input_data: SelfServiceActionInput) -> LawCase | None: ...
   def record_lawyer_service_action(self, user_id: str, case_id: str, input_data: LawyerServiceActionInput) -> LawCase | None: ...
+  def record_full_service_action(self, user_id: str, case_id: str, input_data: FullServiceActionInput) -> LawCase | None: ...
+  def record_lawyer_full_service_action(self, lawyer_id: str, case_id: str, input_data: LawyerFullServiceActionInput) -> LawCase | None: ...
   def list_messages(self, user_id: str) -> list[NotificationMessage]: ...
   def mark_message_read(self, user_id: str, message_id: str) -> NotificationMessage | None: ...
   def list_case_work_items(self, user_id: str, case_id: str) -> list[WorkItem] | None: ...
@@ -537,6 +541,84 @@ class InMemoryStore:
     self._record_event(law_case.id, "stage.changed", title, message, payload)
     return law_case
 
+  def record_full_service_action(self, user_id: str, case_id: str, input_data: FullServiceActionInput) -> LawCase | None:
+    law_case = self.get_case(user_id, case_id)
+    if law_case is None:
+      return None
+    if law_case.selectedPlan != "full-service":
+      raise InvalidStateError("FULL_SERVICE_REQUIRED")
+    _ensure_full_service_evidence_category(law_case)
+    if not _has_approved_lawyer_letter(law_case, self._documents.values()):
+      raise InvalidStateError("APPROVED_LAWYER_LETTER_REQUIRED")
+    _validate_full_service_client_action(input_data, _full_service_send_proof_confirmed(self._work_items.values(), case_id))
+
+    completed_at = _format_datetime(_now())
+    title, message, payload = _apply_full_service_client_action(law_case, input_data, completed_at)
+    if input_data.action == "submit_send_proof":
+      task, created = self._upsert_full_service_work_item(
+        law_case,
+        "send_proof_review",
+        "发送凭证确认待办",
+        _send_proof_review_summary(law_case, input_data),
+      )
+      payload["workItemId"] = task.id
+      event_title = "发送凭证确认待办已创建" if created else "发送凭证确认待办已更新"
+      self._record_event(law_case.id, "task.created" if created else "task.updated", event_title, task.summary, {"workItemId": task.id})
+      self._notify_lawyers(event_title, task.summary, f"/lawyer/tasks/{task.id}", law_case.id)
+    if input_data.action == "record_response":
+      task, created = self._upsert_full_service_work_item(
+        law_case,
+        "lawyer_follow_up",
+        "对方回应处理待办",
+        _full_service_follow_up_summary(law_case, input_data),
+      )
+      payload["workItemId"] = task.id
+      event_title = "对方回应处理待办已创建" if created else "对方回应处理待办已更新"
+      self._record_event(law_case.id, "task.created" if created else "task.updated", event_title, task.summary, {"workItemId": task.id})
+      self._notify_lawyers(event_title, task.summary, f"/lawyer/tasks/{task.id}", law_case.id)
+    self._record_event(law_case.id, "stage.changed", title, message, payload)
+    return law_case
+
+  def record_lawyer_full_service_action(self, lawyer_id: str, case_id: str, input_data: LawyerFullServiceActionInput) -> LawCase | None:
+    if not self._is_lawyer(lawyer_id):
+      return None
+    law_case = self._cases.get(case_id)
+    if law_case is None:
+      return None
+    if law_case.selectedPlan != "full-service":
+      raise InvalidStateError("FULL_SERVICE_REQUIRED")
+    if not _has_approved_lawyer_letter(law_case, self._documents.values()):
+      raise InvalidStateError("APPROVED_LAWYER_LETTER_REQUIRED")
+    _validate_full_service_lawyer_action(input_data, self._work_items.values(), case_id)
+
+    completed_at = _format_datetime(_now())
+    title, message, payload = _apply_full_service_lawyer_action(law_case, input_data, completed_at)
+    if input_data.action == "confirm_send_proof":
+      self._complete_full_service_work_items(case_id, "send_proof_review", "completed")
+      self._create_message(
+        law_case.userId or "",
+        "task",
+        "发送凭证已确认",
+        "律师已确认发送凭证，可以继续记录对方回应。",
+        f"/cases/{case_id}",
+        case_id,
+      )
+    elif input_data.action == "reject_send_proof":
+      self._complete_full_service_work_items(case_id, "send_proof_review", "cancelled")
+      self._create_message(
+        law_case.userId or "",
+        "task",
+        "发送凭证需补充",
+        input_data.note or "律师未确认当前发送凭证，请补充截图、快递单号或签收记录。",
+        f"/cases/{case_id}",
+        case_id,
+      )
+    elif input_data.action in ("decide_response", "prepare_filing", "close_case"):
+      follow_up_status = "in_progress" if input_data.decision in ("promised", "installment", "mediation_requested") else "completed"
+      self._complete_full_service_work_items(case_id, "lawyer_follow_up", follow_up_status)
+    self._record_event(law_case.id, "stage.changed", title, message, payload)
+    return law_case
+
   def list_messages(self, user_id: str) -> list[NotificationMessage]:
     messages = [message for message in self._messages.values() if message.recipientUserId == user_id]
     return sorted(messages, key=lambda item: item.createdAt, reverse=True)
@@ -594,13 +676,13 @@ class InMemoryStore:
       law_case.userId or "",
       "document",
       "文书已确认",
-      f"已确认《{document.title}》，请下载或复制后自行发送，并保留送达、沟通和签收凭证。",
+      _approved_document_client_message(law_case, document),
       f"/cases/{case_id}",
       case_id,
     )
     self._notify_lawyers(
       "用户已确认文书",
-      f"{law_case.debtorName} 已确认 {document.title}，等待客户自行发送并记录对方回应。",
+      _approved_document_lawyer_notification(law_case, document),
       f"/lawyer/cases/{case_id}/documents/{document_id}",
       case_id,
     )
@@ -981,6 +1063,36 @@ class InMemoryStore:
     task = _new_work_item(law_case.id, "lawyer_follow_up", "协商跟进待办", summary, self._first_lawyer_id())
     self._work_items[task.id] = task
     return task, True
+
+  def _upsert_full_service_work_item(
+    self,
+    law_case: LawCase,
+    kind: str,
+    title: str,
+    summary: str,
+  ) -> tuple[WorkItem, bool]:
+    existing = next(
+      (
+        item for item in self._work_items.values()
+        if item.caseId == law_case.id and item.kind == kind and item.status in ("pending", "in_progress")
+      ),
+      None,
+    )
+    if existing is not None:
+      existing.status = "pending"
+      existing.title = title
+      existing.summary = summary
+      existing.updatedAt = _iso(_now())
+      return existing, False
+    task = _new_work_item(law_case.id, kind, title, summary, self._first_lawyer_id())
+    self._work_items[task.id] = task
+    return task, True
+
+  def _complete_full_service_work_items(self, case_id: str, kind: str, status: str) -> None:
+    for task in self._work_items.values():
+      if task.caseId == case_id and task.kind == kind and task.status in ("pending", "in_progress"):
+        task.status = status
+        task.updatedAt = _iso(_now())
 
   def _create_message(
     self,
@@ -1561,6 +1673,112 @@ class PostgresStore:
       conn.commit()
     return law_case
 
+  def record_full_service_action(self, user_id: str, case_id: str, input_data: FullServiceActionInput) -> LawCase | None:
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute("SELECT * FROM cases WHERE id = %s AND user_id = %s", (case_id, user_id))
+        row = cursor.fetchone()
+        if row is None:
+          conn.rollback()
+          return None
+        law_case = self._case_from_row(cursor, row)
+        if law_case.selectedPlan != "full-service":
+          conn.rollback()
+          raise InvalidStateError("FULL_SERVICE_REQUIRED")
+        _ensure_full_service_evidence_category(law_case)
+        if not self._has_approved_lawyer_letter(cursor, case_id):
+          conn.rollback()
+          raise InvalidStateError("APPROVED_LAWYER_LETTER_REQUIRED")
+        _validate_full_service_client_action(input_data, self._full_service_send_proof_confirmed(cursor, case_id))
+
+        completed_at = _format_datetime(_now())
+        title, message, payload = _apply_full_service_client_action(law_case, input_data, completed_at)
+        self._update_case_state(cursor, law_case)
+        if input_data.action == "submit_send_proof":
+          task, created = self._upsert_full_service_work_item(
+            cursor,
+            law_case,
+            "send_proof_review",
+            "发送凭证确认待办",
+            _send_proof_review_summary(law_case, input_data),
+          )
+          payload["workItemId"] = task.id
+          event_title = "发送凭证确认待办已创建" if created else "发送凭证确认待办已更新"
+          self._insert_event(cursor, _new_event(law_case.id, "task.created" if created else "task.updated", event_title, task.summary, {"workItemId": task.id}))
+          self._notify_lawyers(cursor, event_title, task.summary, f"/lawyer/tasks/{task.id}", law_case.id)
+        if input_data.action == "record_response":
+          task, created = self._upsert_full_service_work_item(
+            cursor,
+            law_case,
+            "lawyer_follow_up",
+            "对方回应处理待办",
+            _full_service_follow_up_summary(law_case, input_data),
+          )
+          payload["workItemId"] = task.id
+          event_title = "对方回应处理待办已创建" if created else "对方回应处理待办已更新"
+          self._insert_event(cursor, _new_event(law_case.id, "task.created" if created else "task.updated", event_title, task.summary, {"workItemId": task.id}))
+          self._notify_lawyers(cursor, event_title, task.summary, f"/lawyer/tasks/{task.id}", law_case.id)
+        self._insert_event(cursor, _new_event(law_case.id, "stage.changed", title, message, payload))
+      conn.commit()
+    return law_case
+
+  def record_lawyer_full_service_action(self, lawyer_id: str, case_id: str, input_data: LawyerFullServiceActionInput) -> LawCase | None:
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        if not self._is_lawyer(cursor, lawyer_id):
+          conn.rollback()
+          return None
+        cursor.execute("SELECT * FROM cases WHERE id = %s", (case_id,))
+        row = cursor.fetchone()
+        if row is None:
+          conn.rollback()
+          return None
+        law_case = self._case_from_row(cursor, row)
+        if law_case.selectedPlan != "full-service":
+          conn.rollback()
+          raise InvalidStateError("FULL_SERVICE_REQUIRED")
+        if not self._has_approved_lawyer_letter(cursor, case_id):
+          conn.rollback()
+          raise InvalidStateError("APPROVED_LAWYER_LETTER_REQUIRED")
+        work_items = self._full_service_case_work_items(cursor, case_id)
+        _validate_full_service_lawyer_action(input_data, work_items, case_id)
+
+        completed_at = _format_datetime(_now())
+        title, message, payload = _apply_full_service_lawyer_action(law_case, input_data, completed_at)
+        self._update_case_state(cursor, law_case)
+        if input_data.action == "confirm_send_proof":
+          self._complete_full_service_work_items(cursor, case_id, "send_proof_review", "completed")
+          self._insert_message(
+            cursor,
+            _new_message(
+              law_case.userId or "",
+              "task",
+              "发送凭证已确认",
+              "律师已确认发送凭证，可以继续记录对方回应。",
+              f"/cases/{case_id}",
+              case_id,
+            ),
+          )
+        elif input_data.action == "reject_send_proof":
+          self._complete_full_service_work_items(cursor, case_id, "send_proof_review", "cancelled")
+          self._insert_message(
+            cursor,
+            _new_message(
+              law_case.userId or "",
+              "task",
+              "发送凭证需补充",
+              input_data.note or "律师未确认当前发送凭证，请补充截图、快递单号或签收记录。",
+              f"/cases/{case_id}",
+              case_id,
+            ),
+          )
+        elif input_data.action in ("decide_response", "prepare_filing", "close_case"):
+          follow_up_status = "in_progress" if input_data.decision in ("promised", "installment", "mediation_requested") else "completed"
+          self._complete_full_service_work_items(cursor, case_id, "lawyer_follow_up", follow_up_status)
+        self._insert_event(cursor, _new_event(law_case.id, "stage.changed", title, message, payload))
+      conn.commit()
+    return law_case
+
   def list_messages(self, user_id: str) -> list[NotificationMessage]:
     with self.database.connection() as conn:
       with conn.cursor(row_factory=dict_row) as cursor:
@@ -1654,7 +1872,7 @@ class PostgresStore:
             law_case.userId or "",
             "document",
             "文书已确认",
-            f"已确认《{document.title}》，请下载或复制后自行发送，并保留送达、沟通和签收凭证。",
+            _approved_document_client_message(law_case, document),
             f"/cases/{case_id}",
             case_id,
           ),
@@ -1662,7 +1880,7 @@ class PostgresStore:
         self._notify_lawyers(
           cursor,
           "用户已确认文书",
-          f"{law_case.debtorName} 已确认 {document.title}，等待客户自行发送并记录对方回应。",
+          _approved_document_lawyer_notification(law_case, document),
           f"/lawyer/cases/{case_id}/documents/{document_id}",
           case_id,
         )
@@ -2346,6 +2564,69 @@ class PostgresStore:
     self._insert_work_item(cursor, task)
     return task, True
 
+  def _full_service_send_proof_confirmed(self, cursor, case_id: str) -> bool:
+    cursor.execute(
+      """
+      SELECT id FROM work_items
+      WHERE case_id = %s AND kind = 'send_proof_review' AND status = 'completed'
+      LIMIT 1
+      """,
+      (case_id,),
+    )
+    return cursor.fetchone() is not None
+
+  def _full_service_case_work_items(self, cursor, case_id: str) -> list[WorkItem]:
+    cursor.execute(
+      """
+      SELECT * FROM work_items
+      WHERE case_id = %s AND kind IN ('send_proof_review', 'lawyer_follow_up')
+      ORDER BY created_at ASC
+      """,
+      (case_id,),
+    )
+    return [_work_item_from_row(row) for row in cursor.fetchall()]
+
+  def _upsert_full_service_work_item(
+    self,
+    cursor,
+    law_case: LawCase,
+    kind: str,
+    title: str,
+    summary: str,
+  ) -> tuple[WorkItem, bool]:
+    cursor.execute(
+      """
+      SELECT * FROM work_items
+      WHERE case_id = %s AND kind = %s AND status IN ('pending', 'in_progress')
+      ORDER BY created_at ASC
+      LIMIT 1
+      """,
+      (law_case.id, kind),
+    )
+    row = cursor.fetchone()
+    if row is not None:
+      task = _work_item_from_row(row)
+      task.status = "pending"
+      task.title = title
+      task.summary = summary
+      task.updatedAt = _iso(_now())
+      self._update_work_item_row(cursor, task)
+      return task, False
+    task = _new_work_item(law_case.id, kind, title, summary, self._first_lawyer_id(cursor))
+    self._insert_work_item(cursor, task)
+    return task, True
+
+  def _complete_full_service_work_items(self, cursor, case_id: str, kind: str, status: str) -> None:
+    now = _iso(_now())
+    cursor.execute(
+      """
+      UPDATE work_items
+      SET status = %s, updated_at = %s
+      WHERE case_id = %s AND kind = %s AND status IN ('pending', 'in_progress')
+      """,
+      (status, now, case_id, kind),
+    )
+
   def _notify_lawyers(self, cursor, title: str, body: str, action_href: str, case_id: str | None = None) -> None:
     cursor.execute(
       """
@@ -2492,6 +2773,21 @@ def _create_evidence_categories(case_type: str | None = None) -> list[EvidenceCa
   return create_catalog_evidence_categories(normalize_case_type(case_type))
 
 
+def _ensure_full_service_evidence_category(law_case: LawCase) -> None:
+  if any(category.id == "send_proof" for category in law_case.evidence):
+    return
+  law_case.evidence.append(
+    EvidenceCategory(
+      id="send_proof",
+      name="发送/送达凭证",
+      status="optional",
+      required=False,
+      files=[],
+      insight="留存客户自行发送后的截图、快递单号或签收记录",
+    )
+  )
+
+
 def _new_case(user_id: str, input_data: CreateCaseInput) -> LawCase:
   created_at = _now()
   case_type = normalize_case_type(input_data.caseType)
@@ -2571,6 +2867,8 @@ def _apply_selected_plan(law_case: LawCase, plan_id: PlanId) -> None:
     # 自助路径不进入律师复核语义，最终阶段/状态由 AI 闭环写入。
     law_case.status = "AI方案处理中"
     return
+  if plan_id == "full-service":
+    _ensure_full_service_evidence_category(law_case)
   law_case.status = "律师复核中"
   review_stage = next((stage for stage in law_case.stages if stage.key == "review"), None)
   if review_stage is not None:
@@ -2788,6 +3086,140 @@ def _apply_lawyer_service_action(law_case: LawCase, input_data: LawyerServiceAct
   return "律师服务动作已记录", input_data.note or "客户已记录律师服务后续动作。", payload
 
 
+def _validate_full_service_client_action(input_data: FullServiceActionInput, send_proof_confirmed: bool) -> None:
+  if input_data.action == "submit_send_proof":
+    if not ((input_data.channel or "").strip() or (input_data.note or "").strip()):
+      raise InvalidStateError("SEND_PROOF_REQUIRED")
+  if input_data.action == "record_response":
+    if input_data.response is None:
+      raise InvalidStateError("RESPONSE_REQUIRED")
+    if not send_proof_confirmed:
+      raise InvalidStateError("SEND_PROOF_CONFIRMATION_REQUIRED")
+
+
+def _validate_full_service_lawyer_action(
+  input_data: LawyerFullServiceActionInput,
+  work_items: Iterable[WorkItem],
+  case_id: str,
+) -> None:
+  if input_data.action in ("confirm_send_proof", "reject_send_proof"):
+    has_pending_proof = any(
+      item.caseId == case_id and item.kind == "send_proof_review" and item.status in ("pending", "in_progress")
+      for item in work_items
+    )
+    if not has_pending_proof:
+      raise InvalidStateError("SEND_PROOF_REQUIRED")
+  if input_data.action == "decide_response" and input_data.decision is None:
+    raise InvalidStateError("DECISION_REQUIRED")
+
+
+def _apply_full_service_client_action(law_case: LawCase, input_data: FullServiceActionInput, completed_at: str) -> tuple[str, str, dict[str, Any]]:
+  payload = {
+    "action": input_data.action,
+    "channel": input_data.channel,
+    "response": input_data.response,
+    "note": input_data.note,
+  }
+  if input_data.action == "copy_document":
+    return "已复制律师定稿文书", input_data.note or "客户已复制律师定稿文书，可自行发送并保留凭证。", payload
+  if input_data.action == "download_document":
+    return "已下载律师定稿文书", input_data.note or "客户已下载律师定稿文书，可自行发送并保留凭证。", payload
+  if input_data.action == "submit_send_proof":
+    law_case.status = "发送凭证待律师确认"
+    _set_lawyer_letter_stage(law_case, "active", "客户已提交发送凭证，待律师确认后进入对方回应阶段")
+    _set_lawyer_negotiation_stage(law_case, "todo", "律师确认发送凭证后进入对方回应阶段")
+    return "发送凭证已提交", input_data.note or "客户已提交律师函自行发送凭证，等待律师确认。", payload
+  if input_data.action == "record_response":
+    law_case.status = "已记录对方回应，待律师跟进"
+    _set_lawyer_negotiation_stage(law_case, "active", "客户已记录对方回应，待律师判断下一步")
+    _set_stage(law_case, "filing", "todo", "律师评估后决定是否准备诉讼/仲裁材料")
+    return "对方回应已记录", input_data.note or "客户已记录对方回应，等待律师跟进。", payload
+  if input_data.action == "close_case":
+    law_case.status = "客户已确认结案"
+    _set_lawyer_negotiation_stage(law_case, "done", "客户已确认结案", completed_at)
+    _set_stage(law_case, "filing", "done", "客户已确认结案，无需继续准备材料", completed_at)
+    _set_stage(law_case, "recovery", "done", "客户已确认结案", completed_at)
+    return "客户已确认结案", input_data.note or "客户已确认案件处理完成。", payload
+  return "全程跟进动作已记录", input_data.note or "客户已记录 5999 全程跟进动作。", payload
+
+
+def _apply_full_service_lawyer_action(
+  law_case: LawCase,
+  input_data: LawyerFullServiceActionInput,
+  completed_at: str,
+) -> tuple[str, str, dict[str, Any]]:
+  payload = {
+    "action": input_data.action,
+    "decision": input_data.decision,
+    "note": input_data.note,
+  }
+  if input_data.action == "confirm_send_proof":
+    law_case.status = "发送凭证已确认，等待对方回应"
+    _set_lawyer_letter_stage(law_case, "done", "律师已确认客户发送凭证", completed_at)
+    _set_lawyer_negotiation_stage(law_case, "active", "等待对方回应，客户可记录付款、承诺、拒绝或无回应")
+    return "发送凭证已确认", input_data.note or "律师已确认发送凭证，案件进入对方回应阶段。", payload
+  if input_data.action == "reject_send_proof":
+    law_case.status = "发送凭证需补充"
+    _set_lawyer_letter_stage(law_case, "active", "律师未确认当前发送凭证，请客户补充")
+    _set_lawyer_negotiation_stage(law_case, "todo", "律师确认发送凭证后进入对方回应阶段")
+    return "发送凭证需补充", input_data.note or "律师未确认当前发送凭证，请客户补充材料。", payload
+  if input_data.action == "prepare_filing":
+    law_case.status = "对方无回应或拒绝，进入立案材料准备"
+    _set_lawyer_negotiation_stage(law_case, "done", "律师确认进入诉讼/仲裁材料准备", completed_at)
+    _set_stage(law_case, "filing", "active", "整理证据、发送凭证和沟通记录，准备诉讼/仲裁材料")
+    return "进入立案材料准备", input_data.note or "律师已确认进入诉讼/仲裁材料准备。", payload
+  if input_data.action == "close_case":
+    law_case.status = "客户已确认结案"
+    _set_lawyer_negotiation_stage(law_case, "done", "律师确认案件可结案", completed_at)
+    _set_stage(law_case, "filing", "done", "案件已结案，无需继续准备材料", completed_at)
+    _set_stage(law_case, "recovery", "done", "案件已结案", completed_at)
+    return "案件已结案", input_data.note or "律师已确认案件处理完成。", payload
+  decision = input_data.decision
+  if decision in ("paid", "completed"):
+    law_case.status = "对方已履行，案件可结案"
+    _set_lawyer_negotiation_stage(law_case, "done", "律师确认对方已履行或事项完成", completed_at)
+    _set_stage(law_case, "filing", "done", "对方已履行，暂不需要准备诉讼/仲裁材料", completed_at)
+    _set_stage(law_case, "recovery", "done", "已确认回款或事项完成", completed_at)
+    return "对方已履行", input_data.note or "律师已确认对方履行或事项完成。", payload
+  if decision in ("promised", "installment", "mediation_requested"):
+    law_case.status = "对方承诺履行，律师继续跟进"
+    _set_lawyer_negotiation_stage(law_case, "active", "律师继续跟进承诺履行、分期或协商请求")
+    _set_stage(law_case, "filing", "todo", "继续诉前跟进，暂不进入材料准备")
+    _set_stage(law_case, "recovery", "todo", "等待承诺履行结果")
+    return "律师继续跟进", input_data.note or "律师将继续跟进对方承诺、分期或协商请求。", payload
+  if decision == "delivery_failed":
+    law_case.status = "发送凭证异常，需重新确认或补充发送"
+    _set_lawyer_letter_stage(law_case, "active", "发送凭证异常，需重新确认或补充发送")
+    _set_lawyer_negotiation_stage(law_case, "active", "律师跟进发送异常并确认是否需要重新发送")
+    _set_stage(law_case, "filing", "todo", "发送凭证确认前暂不进入材料准备")
+    _set_stage(law_case, "recovery", "todo", "等待发送凭证重新确认")
+    return "发送凭证异常", input_data.note or "律师判断发送凭证异常，需要重新确认或补充发送。", payload
+  law_case.status = "对方无回应或拒绝，进入立案材料准备"
+  _set_lawyer_negotiation_stage(law_case, "done", "律师确认对方无回应或拒绝", completed_at)
+  _set_stage(law_case, "filing", "active", "整理证据、发送凭证和沟通记录，准备诉讼/仲裁材料")
+  _set_stage(law_case, "recovery", "todo", "等待后续履行或程序结果")
+  return "进入立案材料准备", input_data.note or "律师已确认对方无回应或拒绝，进入材料准备。", payload
+
+
+def _full_service_send_proof_confirmed(work_items: Iterable[WorkItem], case_id: str) -> bool:
+  return any(
+    item.caseId == case_id and item.kind == "send_proof_review" and item.status == "completed"
+    for item in work_items
+  )
+
+
+def _send_proof_review_summary(law_case: LawCase, input_data: FullServiceActionInput) -> str:
+  channel = f"发送方式：{input_data.channel}。" if input_data.channel else ""
+  note = f"客户记录：{input_data.note}" if input_data.note else "客户已提交发送凭证，请核对收函主体、发送方式和凭证完整性。"
+  return f"确认 {law_case.debtorName} 律师函发送凭证。{channel}{note}"
+
+
+def _full_service_follow_up_summary(law_case: LawCase, input_data: FullServiceActionInput) -> str:
+  response = input_data.response or "未填写"
+  note = f"客户记录：{input_data.note}" if input_data.note else "客户已记录对方回应，请判断继续协商、结案或准备材料。"
+  return f"处理 {law_case.debtorName} 律师函发送后的对方回应（{response}）。{note}"
+
+
 def _lawyer_service_needs_follow_up(input_data: LawyerServiceActionInput) -> bool:
   return input_data.action == "request_lawyer_followup" or (
     input_data.action == "record_response" and input_data.response in ("promised", "installment", "mediation_requested")
@@ -2895,13 +3327,30 @@ def _approved_document_status(document_type: str) -> str:
   return "律师函已定稿，待客户自行发送"
 
 
+def _approved_document_client_message(law_case: LawCase, document: LegalDocument) -> str:
+  if law_case.selectedPlan == "full-service" and document.type == "lawyer_letter":
+    return f"已确认《{document.title}》，请下载或复制后自行发送，并提交发送凭证；律师确认凭证后再进入对方回应阶段。"
+  return f"已确认《{document.title}》，请下载或复制后自行发送，并保留送达、沟通和签收凭证。"
+
+
+def _approved_document_lawyer_notification(law_case: LawCase, document: LegalDocument) -> str:
+  if law_case.selectedPlan == "full-service" and document.type == "lawyer_letter":
+    return f"{law_case.debtorName} 已确认 {document.title}，等待客户自行发送并提交发送凭证。"
+  return f"{law_case.debtorName} 已确认 {document.title}，等待客户自行发送并记录对方回应。"
+
+
 def _mark_stage_for_document(law_case: LawCase, document_type: str) -> None:
   if document_type == "lawyer_letter":
-    _set_lawyer_letter_stage(law_case, "active", "律师函已定稿，待客户下载或复制后自行发送")
+    description = "律师函已定稿，待客户下载或复制后自行发送"
+    negotiation_description = "客户自行发送后记录对方回应"
+    if law_case.selectedPlan == "full-service":
+      description = "律师函已定稿，待客户自行发送并提交发送凭证"
+      negotiation_description = "律师确认发送凭证后进入对方回应阶段"
+    _set_lawyer_letter_stage(law_case, "active", description)
     stage = _stage(law_case, "negotiation")
     if stage is not None and stage.status == "todo":
       stage.title = "协商跟进"
-      stage.description = "客户自行发送后记录对方回应"
+      stage.description = negotiation_description
     return
   stage_key = "filing" if document_type == "arbitration_material" else "letter"
   stage = next((item for item in law_case.stages if item.key == stage_key), None)
