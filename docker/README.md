@@ -87,7 +87,7 @@ ALLOWED_ORIGINS=["https://h5.example.com","https://api.example.com"]
 在构建 VM 上：
 
 ```bash
-cd ~/law-app
+cd /usr/local/src/law-app
 git pull
 ./docker/deploy.sh
 ```
@@ -125,7 +125,39 @@ Windows 拉取后脚本可能带 CRLF，在构建 VM 上执行：
 sed -i 's/\r$//' docker/deploy.sh && chmod +x docker/deploy.sh
 ```
 
-## 三、先验证，再上传
+## 三、在 VM 先验证，再上传
+
+VM 上可能已经运行其他应用，验证 compose 默认避开常见占用端口：
+
+```env
+API_HOST_PORT=14000
+WEB_HOST_PORT=18080
+POSTGRES_HOST_PORT=15432
+POSTGRES_PORT=5432
+```
+
+`POSTGRES_HOST_PORT` 是 VM 宿主机映射端口；`POSTGRES_PORT` 是容器网络内 API 连接 PostgreSQL 的端口，通常必须保持 `5432`。不要为了避开宿主机端口冲突去改 `POSTGRES_PORT`。
+
+完整验证 API + Web + PostgreSQL：
+
+```bash
+cd /usr/local/src/law-app
+docker compose -p law-app-verify --env-file apps/api/.env -f docker/docker-compose.infra.yml up -d
+docker compose -p law-app-verify --env-file apps/api/.env -f docker/docker-compose.yml up --build -d
+curl -I http://localhost:18080/
+curl http://localhost:18080/api/v1/health
+docker compose -p law-app-verify --env-file apps/api/.env -f docker/docker-compose.yml down --remove-orphans
+docker compose -p law-app-verify --env-file apps/api/.env -f docker/docker-compose.infra.yml down
+```
+
+如果这些端口仍然冲突，可只改宿主机映射端口：
+
+```bash
+API_HOST_PORT=14001 WEB_HOST_PORT=18081 POSTGRES_HOST_PORT=15433 \
+  docker compose -p law-app-verify --env-file apps/api/.env -f docker/docker-compose.infra.yml up -d
+API_HOST_PORT=14001 WEB_HOST_PORT=18081 POSTGRES_HOST_PORT=15433 \
+  docker compose -p law-app-verify --env-file apps/api/.env -f docker/docker-compose.yml up --build -d
+```
 
 只 build 和本地冒烟，不上传：
 
