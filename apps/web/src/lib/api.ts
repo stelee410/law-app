@@ -17,6 +17,7 @@ import type {
   OtpResponse,
   PlanId,
   ReviewOpinion,
+  SelfServiceActionInput,
   SubmitReviewInput,
   UpdateDocumentInput,
   User,
@@ -149,6 +150,13 @@ export async function evaluateCase(caseId: string): Promise<LawCase> {
 
 export async function selectCasePlan(caseId: string, planId: PlanId): Promise<LawCase> {
   const response = await api.post(apiUrl(`/cases/${caseId}/plan`), { json: { planId } }).json<{ case: LawCase }>();
+  return response.case;
+}
+
+export async function recordSelfServiceAction(caseId: string, input: SelfServiceActionInput): Promise<LawCase> {
+  const response = await api
+    .post(apiUrl(`/cases/${caseId}/self-service/actions`), { json: input })
+    .json<{ case: LawCase }>();
   return response.case;
 }
 

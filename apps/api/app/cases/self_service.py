@@ -44,62 +44,62 @@ _TEMPLATES: dict[CaseType, _SelfServiceTemplate] = {
   "debt_collection": _SelfServiceTemplate(
     document_type="lawyer_letter",
     title_pattern="致{subject}的催收函（AI草稿）",
-    result_label="催收函草稿与追偿行动建议",
-    next_step="查看催收函草稿，按建议发送催告并跟进对方回应",
+    result_label="催告模板与自助追偿清单",
+    next_step="复制或下载催告模板，自行发送后记录送达凭证与对方回应",
     review_title="AI自助处理",
-    review_description="AI已生成催收函草稿与追偿行动建议",
-    document_stage_title=None,
-    document_stage_description="AI已生成催收函草稿，可参考草稿发送催告",
-    next_active_stage_key="negotiation",
-    next_active_stage_description="跟进对方回应，保留送达、沟通和履行记录",
+    review_description="AI已生成催告模板与自助追偿清单",
+    document_stage_title="AI自助处理包",
+    document_stage_description="复制或下载模板，自行发送后记录送达凭证与对方回应",
+    next_active_stage_key="letter",
+    next_active_stage_description="待自行发送或使用模板，并记录处理结果",
   ),
   "lawyer_letter": _SelfServiceTemplate(
     document_type="lawyer_letter",
-    title_pattern="致{subject}的律师函草稿（AI生成）",
-    result_label="律师函草稿",
-    next_step="核对函件事实与措辞，确认发送方式与收函方信息",
+    title_pattern="致{subject}的函件草稿（AI生成）",
+    result_label="函件草稿与使用清单",
+    next_step="复制或下载函件草稿；如需正式律师函，请升级人工复核",
     review_title=None,
-    review_description="AI已生成律师函草稿",
-    document_stage_title="发送准备",
-    document_stage_description="AI已生成律师函草稿，发送前请自助核对内容",
-    next_active_stage_key="negotiation",
-    next_active_stage_description="确认发函方式与收函方信息；如需律师署名可升级服务",
+    review_description="AI已生成函件草稿与使用清单",
+    document_stage_title="AI自助处理包",
+    document_stage_description="AI已生成函件草稿；正式律师函需律师复核或律所出具",
+    next_active_stage_key="letter",
+    next_active_stage_description="待自行使用草稿、记录结果或升级人工复核",
   ),
   "labor_dispute": _SelfServiceTemplate(
     document_type="arbitration_material",
     title_pattern="劳动仲裁申请建议书（AI生成）",
-    result_label="仲裁请求建议",
-    next_step="按建议整理仲裁申请材料并核对仲裁时效",
+    result_label="劳动争议自助材料包",
+    next_step="整理劳动关系证据、沟通记录和仲裁准备清单，并记录处理结果",
     review_title=None,
-    review_description="AI已生成仲裁请求建议",
-    document_stage_title=None,
-    document_stage_description="AI已生成仲裁申请材料建议",
-    next_active_stage_key="filing",
-    next_active_stage_description="按AI建议准备劳动仲裁立案材料",
+    review_description="AI已生成劳动争议自助材料包",
+    document_stage_title="AI自助处理包",
+    document_stage_description="AI已生成劳动争议材料清单、沟通模板和仲裁准备建议",
+    next_active_stage_key="letter",
+    next_active_stage_description="待自行沟通、准备仲裁材料或升级人工复核",
   ),
   "rental_dispute": _SelfServiceTemplate(
     document_type="lawyer_letter",
     title_pattern="租赁纠纷协商函（AI草稿）",
-    result_label="协商函草稿与处理建议",
-    next_step="查看协商函草稿，与对方协商或按建议准备起诉材料",
+    result_label="租赁纠纷自助处理包",
+    next_step="复制或下载协商函，记录对方回应、押金/租金处理结果",
     review_title=None,
-    review_description="AI已生成协商函草稿与处理建议",
-    document_stage_title=None,
-    document_stage_description="AI已生成协商函草稿，可参考草稿与对方沟通",
-    next_active_stage_key="negotiation",
-    next_active_stage_description="跟进双方协商与调解结果",
+    review_description="AI已生成租赁纠纷协商函与处理清单",
+    document_stage_title="AI自助处理包",
+    document_stage_description="AI已生成协商函草稿、证据清单和回应记录指引",
+    next_active_stage_key="letter",
+    next_active_stage_description="待自行沟通、记录回应或升级人工复核",
   ),
   "contract_review": _SelfServiceTemplate(
     document_type="contract_review_opinion",
     title_pattern="合同审查意见（AI生成）",
-    result_label="合同审查意见",
-    next_step="按审查意见核对风险条款并确认修改点",
+    result_label="合同风险清单与修改建议",
+    next_step="核对风险条款，记录是否采纳修改建议或需要人工复核",
     review_title=None,
-    review_description="AI已生成合同审查意见",
-    document_stage_title=None,
-    document_stage_description="AI已生成合同审查意见和修改建议",
-    next_active_stage_key="filing",
-    next_active_stage_description="确认修改版和谈判要点",
+    review_description="AI已生成合同风险清单与修改建议",
+    document_stage_title="AI自助处理包",
+    document_stage_description="AI已生成风险条款清单、修改建议和谈判要点",
+    next_active_stage_key="letter",
+    next_active_stage_description="待确认采纳结果、对方反馈或升级律师精审",
     todo_stage_notes=(("negotiation", "如需可升级律师精审关键条款"),),
   ),
 }
@@ -123,8 +123,8 @@ def build_self_service_payload(law_case: LawCase) -> SelfServicePayload:
     nextStep=template.next_step,
     statusText=f"AI自助处理完成：已生成{template.result_label}",
     taskSummary=f"已生成《{title}》；下一步：{template.next_step}。",
-    messageTitle="AI自助处理结果已生成",
-    messageBody=f"AI已生成《{title}》，可在案件详情查看全文；下一步：{template.next_step}。",
+    messageTitle="AI自助处理包已生成",
+    messageBody=f"AI已生成《{title}》和自助处理清单；请复制或下载模板，并在案件详情记录自行处理结果。",
   )
 
 
@@ -138,16 +138,12 @@ def apply_self_service_outcome(law_case: LawCase, payload: SelfServicePayload, c
       stage.description = template.review_description
       stage.status = "done"
       stage.at = completed_at
-    elif stage.key == "letter":
+    elif stage.key == template.next_active_stage_key:
       if template.document_stage_title is not None:
         stage.title = template.document_stage_title
       stage.description = template.document_stage_description
-      stage.status = "done"
-      stage.at = completed_at
-    elif stage.key == template.next_active_stage_key:
-      if template.next_active_stage_description is not None:
-        stage.description = template.next_active_stage_description
       stage.status = "active"
+      stage.at = None
   for stage_key, note in template.todo_stage_notes:
     stage = next((item for item in law_case.stages if item.key == stage_key), None)
     if stage is not None and stage.status == "todo":

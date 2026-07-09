@@ -218,6 +218,13 @@ def test_lawyer_review_document_closed_loop() -> None:
   assert lawyer_documents.status_code == 200
   assert lawyer_documents.json()["documents"][0]["id"] == document["id"]
 
+  client_draft_documents = client.get(
+    f"/api/v1/cases/{case_id}/documents",
+    headers=client_headers,
+  )
+  assert client_draft_documents.status_code == 200
+  assert all(item["id"] != document["id"] for item in client_draft_documents.json()["documents"])
+
   premature_approval = client.post(
     f"/api/v1/cases/{case_id}/documents/{document['id']}/approve",
     headers=client_headers,
@@ -250,6 +257,14 @@ def test_lawyer_review_document_closed_loop() -> None:
   )
   assert submitted_document.status_code == 200
   assert submitted_document.json()["document"]["status"] == "pending_client_approval"
+
+  client_pending_documents = client.get(
+    f"/api/v1/cases/{case_id}/documents",
+    headers=client_headers,
+  )
+  assert client_pending_documents.status_code == 200
+  assert client_pending_documents.json()["documents"][0]["id"] == document["id"]
+  assert client_pending_documents.json()["documents"][0]["status"] == "pending_client_approval"
 
   resubmitted_pending_document = client.post(
     f"/api/v1/lawyer/cases/{case_id}/documents/{document['id']}/submit",
@@ -327,16 +342,16 @@ def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
   letter_stage = next(stage for stage in selected_case["stages"] if stage["key"] == "letter")
   active_stage = next(stage for stage in selected_case["stages"] if stage["status"] == "active")
   assert review_stage["status"] == "done"
-  assert letter_stage["status"] == "done"
-  assert active_stage["key"] == "negotiation"
-  assert active_stage["key"] != "letter"
+  assert letter_stage["title"] == "AI自助处理包"
+  assert letter_stage["status"] == "active"
+  assert active_stage["key"] == "letter"
   assert "律师复核" not in active_stage["title"]
 
   work_items = client.get(f"/api/v1/cases/{case_id}/work-items", headers=client_headers)
   assert work_items.status_code == 200
   ai_items = [item for item in work_items.json()["workItems"] if item["kind"] == "ai_guidance"]
   assert len(ai_items) == 1
-  assert ai_items[0]["status"] == "completed"
+  assert ai_items[0]["status"] == "in_progress"
   assert "草稿" in ai_items[0]["summary"]
   assert "下一步" in ai_items[0]["summary"]
   assert [item for item in work_items.json()["workItems"] if item["kind"] == "lawyer_review"] == []
@@ -357,7 +372,7 @@ def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
 
   messages = client.get("/api/v1/messages", headers=client_headers)
   assert messages.status_code == 200
-  assert any(message["title"] == "AI自助处理结果已生成" for message in messages.json()["messages"])
+  assert any(message["title"] == "AI自助处理包已生成" for message in messages.json()["messages"])
 
   lawyer_tasks = client.get("/api/v1/lawyer/tasks", headers=lawyer_headers)
   assert lawyer_tasks.status_code == 200
@@ -377,8 +392,8 @@ def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
   assert current_case["status"].startswith("AI自助处理完成：")
   current_letter_stage = next(stage for stage in current_case["stages"] if stage["key"] == "letter")
   current_active_stage = next(stage for stage in current_case["stages"] if stage["status"] == "active")
-  assert current_letter_stage["status"] == "done"
-  assert current_active_stage["key"] == "negotiation"
+  assert current_letter_stage["status"] == "active"
+  assert current_active_stage["key"] == "letter"
 
   selected_again = client.post(
     f"/api/v1/cases/{case_id}/plan",
@@ -396,6 +411,99 @@ def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
     if document["fields"].get("source") == "ai_self_service"
   ]
   assert len(repeated_self_service_documents) == 1
+
+
+def test_self_service_actions_advance_mvp_loop() -> None:
+  client = TestClient(create_app(_test_settings()))
+  client_headers = _register_client(client, phone="13800001234")
+  case_id = _create_case(client, client_headers)
+  _upload_required_evidence(client, client_headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+  assert client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "self-service"},
+  ).status_code == 200
+
+  sent = client.post(
+    f"/api/v1/cases/{case_id}/self-service/actions",
+    headers=client_headers,
+    json={"action": "mark_sent", "channel": "EMS", "note": "已自行寄出催告材料"},
+  )
+  assert sent.status_code == 200
+  sent_case = sent.json()["case"]
+  letter_stage = next(stage for stage in sent_case["stages"] if stage["key"] == "letter")
+  negotiation_stage = next(stage for stage in sent_case["stages"] if stage["key"] == "negotiation")
+  assert letter_stage["status"] == "done"
+  assert negotiation_stage["status"] == "active"
+  assert sent_case["status"] == "已自行处理，等待对方回应"
+
+  no_response = client.post(
+    f"/api/v1/cases/{case_id}/self-service/actions",
+    headers=client_headers,
+    json={"action": "record_response", "response": "no_response", "note": "三日未回应"},
+  )
+  assert no_response.status_code == 200
+  no_response_case = no_response.json()["case"]
+  filing_stage = next(stage for stage in no_response_case["stages"] if stage["key"] == "filing")
+  assert filing_stage["status"] == "active"
+  assert no_response_case["status"] == "建议准备材料或升级人工服务"
+
+  paid = client.post(
+    f"/api/v1/cases/{case_id}/self-service/actions",
+    headers=client_headers,
+    json={"action": "record_response", "response": "paid", "note": "已回款"},
+  )
+  assert paid.status_code == 200
+  paid_case = paid.json()["case"]
+  paid_filing_stage = next(stage for stage in paid_case["stages"] if stage["key"] == "filing")
+  recovery_stage = next(stage for stage in paid_case["stages"] if stage["key"] == "recovery")
+  assert paid_filing_stage["status"] == "done"
+  assert recovery_stage["status"] == "done"
+  assert all(stage["status"] != "active" for stage in paid_case["stages"])
+  assert paid_case["status"] == "已完成自助处理"
+
+
+def test_lawyer_review_plan_keeps_standard_lawyer_letter_stage() -> None:
+  client = TestClient(create_app(_test_settings()))
+  client_headers = _register_client(client, phone="13800001234")
+  case_id = _create_case(client, client_headers)
+  _upload_required_evidence(client, client_headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+
+  selected = client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "lawyer-review"},
+  )
+
+  assert selected.status_code == 200
+  selected_case = selected.json()["case"]
+  letter_stage = next(stage for stage in selected_case["stages"] if stage["key"] == "letter")
+  assert letter_stage["title"] == "发送律师函"
+  assert letter_stage["description"] == "生成并发送律师函"
+
+
+def test_self_service_action_requires_self_service_plan() -> None:
+  client = TestClient(create_app(_test_settings()))
+  client_headers = _register_client(client, phone="13800001234")
+  case_id = _create_case(client, client_headers)
+  _upload_required_evidence(client, client_headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+  assert client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "lawyer-review"},
+  ).status_code == 200
+
+  action = client.post(
+    f"/api/v1/cases/{case_id}/self-service/actions",
+    headers=client_headers,
+    json={"action": "mark_sent"},
+  )
+
+  assert action.status_code == 409
+  assert action.json()["detail"] == "SELF_SERVICE_REQUIRED"
 
 
 def test_lawyer_can_read_case_evidence_file(tmp_path: Path) -> None:

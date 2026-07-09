@@ -69,6 +69,22 @@ export type ReviewNextAction =
 export type LegalDocumentType = 'lawyer_letter' | 'arbitration_material' | 'contract_review_opinion';
 export type LegalDocumentStatus = 'draft' | 'pending_client_approval' | 'approved' | 'sent' | 'archived';
 export type NotificationType = 'case' | 'task' | 'review' | 'document' | 'system';
+export type SelfServiceAction =
+  | 'copy_template'
+  | 'download_template'
+  | 'mark_sent'
+  | 'upload_proof'
+  | 'record_response'
+  | 'close_case'
+  | 'upgrade_service';
+export type SelfServiceResponse =
+  | 'paid'
+  | 'promised'
+  | 'installment'
+  | 'rejected'
+  | 'no_response'
+  | 'need_review'
+  | 'completed';
 
 export type ServicePlan = {
   id: PlanId;
@@ -274,6 +290,13 @@ export type NotificationMessage = {
   unread: boolean;
   actionHref: string;
   createdAt: string;
+};
+
+export type SelfServiceActionInput = {
+  action: SelfServiceAction;
+  channel?: string;
+  response?: SelfServiceResponse;
+  note?: string;
 };
 
 export type SubmitReviewInput = {

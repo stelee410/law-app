@@ -15,6 +15,8 @@ export function PlanCard({
   pending: boolean;
   onSelect: () => void;
 }) {
+  const actionLabel = `${selected ? '已选择' : '选择'}${plan.name} ${plan.price}元`;
+
   return (
     <article className={`relative rounded-lg border bg-white p-4 shadow-sm ${plan.recommended ? 'border-blue-500' : 'border-slate-100'}`}>
       {plan.recommended && (
@@ -42,6 +44,7 @@ export function PlanCard({
           selected ? 'bg-emerald-100 text-emerald-700' : plan.recommended ? 'bg-blue-600 text-white shadow-blue-100' : 'bg-slate-100 text-slate-800'
         } disabled:opacity-50`}
         type="button"
+        aria-label={actionLabel}
         disabled={pending || locked}
         onClick={onSelect}
       >

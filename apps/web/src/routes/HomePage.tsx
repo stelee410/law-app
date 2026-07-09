@@ -43,9 +43,9 @@ export function HomePage() {
       <section className="overflow-hidden rounded-lg border border-blue-100 bg-white shadow-sm">
         <img className="h-28 w-full object-cover" src={loginHero} alt="AI 法律服务协作" loading="eager" />
         <div className="p-4">
-          <h2 className="break-words text-2xl font-black leading-tight tracking-normal">AI帮你追回应收账款</h2>
+          <h2 className="break-words text-2xl font-black leading-tight tracking-normal">399自助闭环追回应收账款</h2>
           <div className="mt-3 space-y-2 text-sm leading-5 text-slate-600">
-            {['智能分析证据，高效追款', '律师函在线生成，一键发送', '全程进度跟踪，回款更有保障'].map((item) => (
+            {['AI整理证据与追偿路径', '复制或下载模板，自行发送', '记录送达、回应和回款进度'].map((item) => (
               <p className="flex gap-2" key={item}>
                 <Check className="mt-0.5 shrink-0 text-emerald-600" size={15} />
                 <span className="break-words">{item}</span>

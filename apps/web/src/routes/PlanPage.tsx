@@ -70,11 +70,11 @@ export function PlanPage() {
         <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-semibold text-slate-700">
           <span className="flex items-center gap-2 rounded-lg bg-blue-50 p-3 text-blue-700">
             <BadgeCheck size={18} />
-            律师审核
+            人工复核
           </span>
           <span className="flex items-center gap-2 rounded-lg bg-emerald-50 p-3 text-emerald-700">
             <Headphones size={18} />
-            顾问跟进
+            服务方跟进
           </span>
           <span className="flex items-center gap-2 rounded-lg bg-slate-50 p-3">
             <ShieldCheck size={18} />

@@ -199,11 +199,11 @@ const lockedPlanCase = {
       ...assessedCase.assessment.plans,
       {
         id: 'self-service',
-        name: 'AI 自助包',
-        subtitle: '轻量自动引导',
-        price: 299,
-        fee: '固定费',
-        features: ['AI 补证提示', '材料草稿生成']
+        name: 'AI自助版',
+        subtitle: '适合预算有限 / 自主操作',
+        price: 399,
+        fee: '一次性服务费',
+        features: ['AI生成材料草稿', '复制或下载模板', '自助发送后记录结果']
       }
     ]
   }
@@ -255,7 +255,7 @@ const archivedLawyerDocument = {
 const selfServiceCase = {
   ...assessedCase,
   selectedPlan: 'self-service',
-  status: 'AI自助处理完成：已生成催收函草稿与追偿行动建议',
+  status: 'AI自助处理完成：已生成催告模板与自助追偿清单',
   stages: [
     {
       key: 'submit',
@@ -280,16 +280,50 @@ const selfServiceCase = {
     },
     {
       key: 'letter',
-      title: '发送律师函',
-      description: 'AI已生成催收函草稿，可参考草稿发送催告',
-      status: 'done',
-      at: '2026-06-03'
+      title: 'AI自助处理包',
+      description: '复制或下载模板，自行发送后记录送达凭证与对方回应',
+      status: 'active'
     },
     {
       key: 'negotiation',
       title: '协商调解',
-      description: '跟进对方回应，保留送达、沟通和履行记录',
+      description: '记录对方回应后进入下一步建议',
+      status: 'todo'
+    }
+  ]
+};
+
+const selfServiceEscalationCase = {
+  ...selfServiceCase,
+  status: '建议准备材料或升级人工服务',
+  stages: [
+    ...selfServiceCase.stages.slice(0, 4).map((stage) =>
+      stage.key === 'letter'
+        ? {
+            ...stage,
+            status: 'done',
+            description: 'AI自助处理包已使用并记录结果',
+            at: '2026-06-04'
+          }
+        : stage
+    ),
+    {
+      key: 'negotiation',
+      title: '协商调解',
+      description: '等待对方回应，继续保留送达、沟通和履行记录',
       status: 'active'
+    },
+    {
+      key: 'filing',
+      title: '立案材料准备',
+      description: '可整理材料包，或升级人工复核/代办服务',
+      status: 'active'
+    },
+    {
+      key: 'recovery',
+      title: '回款 / 结案',
+      description: '回款完成或法院判决后结案',
+      status: 'todo'
     }
   ]
 };
@@ -299,9 +333,9 @@ const selfServiceWorkItems = [
     id: 'task-ai-guidance',
     caseId: 'case-test',
     kind: 'ai_guidance',
-    status: 'completed',
-    title: 'AI自助任务',
-    summary: '已生成《致测试债务人有限公司的催收函（AI草稿）》；下一步：查看催收函草稿。'
+    status: 'in_progress',
+    title: 'AI自助处理包',
+    summary: '已生成《致测试债务人有限公司的催收函（AI草稿）》；下一步：复制或下载催告模板，自行发送后记录送达凭证与对方回应。'
   },
   {
     id: 'task-ai-pending',
@@ -473,7 +507,7 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('AI帮你追回应收账款')).toBeInTheDocument();
+    expect(await screen.findByText('399自助闭环追回应收账款')).toBeInTheDocument();
     expect((await screen.findAllByText('欠款追偿')).length).toBeGreaterThan(0);
     expect(await screen.findByText('律师函')).toBeInTheDocument();
     expect(await screen.findByText('劳动争议')).toBeInTheDocument();
@@ -1021,7 +1055,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: '选择此方案' }));
+    await user.click(await screen.findByRole('button', { name: /选择律师复核包.*1499/ }));
     expect(selectSpy).not.toHaveBeenCalled();
     expect(await screen.findByText('确认选择服务方案')).toBeInTheDocument();
 
@@ -1042,8 +1076,8 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('button', { name: '已选择' })).toBeDisabled();
-    expect(await screen.findByRole('button', { name: '选择此方案' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /已选择律师复核包.*1499/ })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /选择AI自助版.*399/ })).toBeDisabled();
   });
 
   it('renders message center from backend notifications', async () => {
@@ -1242,7 +1276,7 @@ describe('App', () => {
     expect(await screen.findByText('选择服务方案')).toBeInTheDocument();
   });
 
-  it('renders self-service result tasks and AI generated document read-only', async () => {
+  it('renders self-service action package and AI generated document read-only', async () => {
     useAuthStore.getState().setSession({
       token: 'test-token',
       user: testUser,
@@ -1256,15 +1290,69 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('AI自助处理结果')).toBeInTheDocument();
-    expect(await screen.findByText('已完成')).toBeInTheDocument();
+    expect((await screen.findAllByText('AI自助处理包')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('处理中')).toBeInTheDocument();
     expect(await screen.findByText('待处理')).toBeInTheDocument();
-    expect(screen.queryByText('处理中')).not.toBeInTheDocument();
-    expect((await screen.findByText('发送律师函')).parentElement).not.toHaveTextContent('进行中');
-    expect((await screen.findByText('协商调解')).parentElement).toHaveTextContent('进行中');
+    expect((await screen.findAllByText('AI自助处理包'))[0].parentElement).toHaveTextContent('进行中');
+    expect((await screen.findByText('协商调解')).parentElement).not.toHaveTextContent('进行中');
+    expect(await screen.findByRole('button', { name: '复制文案' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '下载模板' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '我已自行发送/使用' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '已付款/已完成' })).toBeInTheDocument();
     expect(await screen.findByText('致测试债务人有限公司的催收函（AI草稿）')).toBeInTheDocument();
     expect(await screen.findByText('AI生成')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '确认文书并进入下一阶段' })).not.toBeInTheDocument();
+  });
+
+  it('normalizes stale self-service stages to one active next action', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), selfServiceEscalationCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), selfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [selfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    expect((await screen.findByText('立案材料准备')).parentElement).toHaveTextContent('进行中');
+    expect((await screen.findByText('协商调解')).parentElement).not.toHaveTextContent('进行中');
+    expect(screen.getAllByText('进行中')).toHaveLength(1);
+  });
+
+  it('records self-service action from the case detail panel', async () => {
+    const updatedCase = {
+      ...selfServiceCase,
+      status: '已自行处理，等待对方回应'
+    };
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordSelfServiceAction: (caseId: string, input: unknown) => Promise<typeof updatedCase> }, 'recordSelfServiceAction')
+      .mockResolvedValue(updatedCase);
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-test'), selfServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-test'), selfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-test'), [selfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-test' } });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '我已自行发送/使用' }));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith('case-test', {
+        action: 'mark_sent',
+        channel: '自行发送',
+        note: '用户确认已自行发送或使用 AI 自助材料'
+      });
+    });
   });
 });
 

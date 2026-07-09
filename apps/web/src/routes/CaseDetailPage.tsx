@@ -1,14 +1,15 @@
 import { Link, useParams } from '@tanstack/react-router';
-import { ArrowLeft, Check, ChevronRight, CloudUpload, Contact, FileCheck2, FileSearch, Headphones, MessageCircle, Radio, Scale } from 'lucide-react';
+import { ArrowLeft, Check, CheckCircle2, ChevronRight, ClipboardCopy, CloudUpload, Contact, Download, FileCheck2, FileSearch, Headphones, MessageCircle, Radio, Scale, Send, UploadCloud } from 'lucide-react';
 import { useState } from 'react';
 import { MetricCard } from '../components/h5/MetricCard';
 import { SectionHeader } from '../components/h5/SectionHeader';
 import { Timeline } from '../components/h5/Timeline';
 import { StateBlock } from '../components/StateBlock';
 import { useCaseEvents } from '../hooks/useCaseEvents';
-import { useApproveDocumentMutation, useCaseDocumentsQuery, useCaseQuery, useCaseWorkItemsQuery } from '../hooks/useCaseQueries';
+import { useApproveDocumentMutation, useCaseDocumentsQuery, useCaseQuery, useCaseWorkItemsQuery, useRecordSelfServiceActionMutation } from '../hooks/useCaseQueries';
 import { getCaseCatalogItem } from '../lib/caseCatalog';
 import { fileSizeLabel, formatDate, formatMoney } from '../lib/format';
+import type { CaseStage, SelfServiceActionInput } from '../lib/types';
 import { deriveLatestProgress, evidenceProgress, stageProgress } from '../lib/viewModel';
 
 export function CaseDetailPage() {
@@ -17,6 +18,7 @@ export function CaseDetailPage() {
   const workItemsQuery = useCaseWorkItemsQuery(caseId);
   const documentsQuery = useCaseDocumentsQuery(caseId);
   const approveDocument = useApproveDocumentMutation(caseId);
+  const recordSelfServiceAction = useRecordSelfServiceActionMutation(caseId);
   const { events, connected } = useCaseEvents(caseId, Boolean(caseQuery.data));
   const lawCase = caseQuery.data;
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<string>>(() => new Set());
@@ -26,11 +28,15 @@ export function CaseDetailPage() {
 
   const evidence = evidenceProgress(lawCase);
   const stages = stageProgress(lawCase.stages);
-  const latest = deriveLatestProgress(lawCase, events);
+  const isSelfService = lawCase.selectedPlan === 'self-service';
+  const displayStages = isSelfService
+    ? normalizeSelfServiceStages(lawCase.stages)
+    : lawCase.stages;
+  const displayCase = isSelfService ? { ...lawCase, stages: displayStages } : lawCase;
+  const latest = deriveLatestProgress(displayCase, events);
   const catalog = getCaseCatalogItem(lawCase.caseType);
   const workItems = workItemsQuery.data ?? [];
   const documents = documentsQuery.data ?? [];
-  const isSelfService = lawCase.selectedPlan === 'self-service';
   const pendingDocuments = isSelfService ? [] : documents.filter((document) => document.status === 'pending_client_approval');
   const selfServiceDocuments = isSelfService
     ? documents.filter((document) => document.status === 'approved' && document.fields.source === 'ai_self_service')
@@ -46,9 +52,11 @@ export function CaseDetailPage() {
         ? { href: `/cases/${caseId}/plans`, label: '选择服务方案' }
         : pendingDocuments.length > 0
           ? { href: `/cases/${caseId}#pending-documents`, label: '确认待办文书' }
-          : { href: '/messages', label: '查看服务通知' };
-  const serviceTitle = isSelfService ? 'AI自助处理结果' : lawCase.selectedPlan ? '律师服务闭环' : '服务待选择';
-  const serviceSubtitle = isSelfService ? 'AI生成的处理结果、待办状态和客户可见文书会在这里汇总' : '服务方案选择后，待办、复核意见和文书确认会在这里汇总';
+          : isSelfService
+            ? { href: `#self-service-actions`, label: '继续自助处理' }
+            : { href: '/messages', label: '查看服务通知' };
+  const serviceTitle = isSelfService ? 'AI自助处理包' : lawCase.selectedPlan ? '律师服务闭环' : '服务待选择';
+  const serviceSubtitle = isSelfService ? '复制或下载 AI 模板，自行处理后记录凭证、回应和下一步结果' : '服务方案选择后，待办、复核意见和文书确认会在这里汇总';
 
   function toggleDocument(documentId: string) {
     setExpandedDocumentIds((current) => {
@@ -60,6 +68,32 @@ export function CaseDetailPage() {
       }
       return next;
     });
+  }
+
+  const primarySelfServiceDocument = selfServiceDocuments[0];
+
+  function recordAction(input: SelfServiceActionInput) {
+    recordSelfServiceAction.mutate(input);
+  }
+
+  async function handleCopyTemplate() {
+    if (primarySelfServiceDocument?.body && navigator.clipboard) {
+      await navigator.clipboard.writeText(primarySelfServiceDocument.body).catch(() => undefined);
+    }
+    recordAction({ action: 'copy_template', note: '用户已复制 AI 自助模板' });
+  }
+
+  function handleDownloadTemplate() {
+    if (primarySelfServiceDocument) {
+      const blob = new Blob([primarySelfServiceDocument.body], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${primarySelfServiceDocument.title}.txt`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    }
+    recordAction({ action: 'download_template', note: '用户已下载 AI 自助模板' });
   }
 
   return (
@@ -113,7 +147,7 @@ export function CaseDetailPage() {
             {connected ? '实时连接' : '等待事件'}
           </span>
         </div>
-        <Timeline stages={lawCase.stages} />
+        <Timeline stages={displayStages} />
       </section>
 
       <section className="rounded-lg border border-amber-100 bg-amber-50 p-4 text-amber-900 shadow-sm">
@@ -182,6 +216,84 @@ export function CaseDetailPage() {
               <p className="rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-500">等待系统生成服务待办。</p>
             )}
           </div>
+        </section>
+      )}
+
+      {isSelfService && (
+        <section id="self-service-actions" className="rounded-lg border border-emerald-100 bg-white p-4 shadow-sm">
+          <SectionHeader
+            title="399 自助闭环"
+            subtitle="平台只提供模板和指引；请自行处理后记录凭证、回应和结案结果"
+          />
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button
+              className="flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-100 px-2 text-sm font-black text-slate-700 disabled:opacity-50"
+              type="button"
+              disabled={recordSelfServiceAction.isPending || !primarySelfServiceDocument}
+              onClick={() => void handleCopyTemplate()}
+            >
+              <ClipboardCopy size={16} />
+              复制文案
+            </button>
+            <button
+              className="flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-100 px-2 text-sm font-black text-slate-700 disabled:opacity-50"
+              type="button"
+              disabled={recordSelfServiceAction.isPending || !primarySelfServiceDocument}
+              onClick={handleDownloadTemplate}
+            >
+              <Download size={16} />
+              下载模板
+            </button>
+            <button
+              className="col-span-2 flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-2 text-sm font-black text-white shadow-sm shadow-blue-100 disabled:opacity-50"
+              type="button"
+              disabled={recordSelfServiceAction.isPending}
+              onClick={() => recordAction({ action: 'mark_sent', channel: '自行发送', note: '用户确认已自行发送或使用 AI 自助材料' })}
+            >
+              <Send size={16} />
+              我已自行发送/使用
+            </button>
+            <button
+              className="flex h-11 items-center justify-center gap-2 rounded-lg bg-emerald-50 px-2 text-sm font-black text-emerald-700 disabled:opacity-50"
+              type="button"
+              disabled={recordSelfServiceAction.isPending}
+              onClick={() => recordAction({ action: 'upload_proof', channel: '自行留痕', note: '用户已记录送达或处理凭证' })}
+            >
+              <UploadCloud size={16} />
+              已留存凭证
+            </button>
+            <button
+              className="flex h-11 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-2 text-sm font-black text-white disabled:opacity-50"
+              type="button"
+              disabled={recordSelfServiceAction.isPending}
+              onClick={() => recordAction({ action: 'record_response', response: 'paid', note: '用户确认已付款或事项已完成' })}
+            >
+              <CheckCircle2 size={16} />
+              已付款/已完成
+            </button>
+            <button
+              className="flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-50 px-2 text-sm font-black text-amber-800 disabled:opacity-50"
+              type="button"
+              disabled={recordSelfServiceAction.isPending}
+              onClick={() => recordAction({ action: 'record_response', response: 'no_response', note: '用户记录对方无回应或拒绝处理' })}
+            >
+              无回应/拒绝
+            </button>
+            <button
+              className="flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-900 px-2 text-sm font-black text-white disabled:opacity-50"
+              type="button"
+              disabled={recordSelfServiceAction.isPending}
+              onClick={() => recordAction({ action: 'upgrade_service', note: '用户申请升级人工复核或代办服务' })}
+            >
+              升级人工服务
+            </button>
+          </div>
+          <p className="mt-3 rounded-lg bg-emerald-50 p-3 text-xs font-semibold leading-5 text-emerald-800">
+            399 自助版不代发、不代理、不出具正式律师函；正式律师函、调解或代办服务需升级人工服务。
+          </p>
+          {recordSelfServiceAction.isError && (
+            <p className="mt-2 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">自助进度记录失败，请稍后重试。</p>
+          )}
         </section>
       )}
 
@@ -265,4 +377,24 @@ function workItemStatusClass(status: string) {
     default:
       return 'bg-slate-100 text-slate-600';
   }
+}
+
+function normalizeSelfServiceStages(stages: CaseStage[]) {
+  const activePriority = ['filing', 'negotiation', 'letter'];
+  const activeStageKey = activePriority.find((key) => stages.some((stage) => stage.key === key && stage.status === 'active'));
+
+  return stages.map((stage) => {
+    const normalizedStage = activeStageKey && stage.status === 'active' && stage.key !== activeStageKey
+      ? { ...stage, status: 'done' as const }
+      : stage;
+    if (normalizedStage.key !== 'letter') return normalizedStage;
+    return {
+      ...normalizedStage,
+      title: 'AI自助处理包',
+      description:
+        normalizedStage.status === 'done'
+          ? 'AI自助处理包已使用并记录结果'
+          : '复制或下载模板，自行发送后记录送达凭证与回应'
+    };
+  });
 }

@@ -21,6 +21,7 @@ import {
   loginWithCode,
   markMessageRead,
   onboardLawyer,
+  recordSelfServiceAction,
   requestLoginCode,
   registerClient,
   reviewAdminLawyer,
@@ -40,6 +41,7 @@ import type {
   LawCase,
   LawyerOnboardingInput,
   PlanId,
+  SelfServiceActionInput,
   SubmitReviewInput,
   UpdateDocumentInput
 } from '../lib/types';
@@ -292,6 +294,21 @@ export function useSelectPlanMutation(caseId: string) {
         queryClient.invalidateQueries({ queryKey: caseKeys.lists }),
         queryClient.invalidateQueries({ queryKey: caseKeys.workItems(caseId) }),
         queryClient.invalidateQueries({ queryKey: caseKeys.documents(caseId) }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.messages })
+      ]);
+    }
+  });
+}
+
+export function useRecordSelfServiceActionMutation(caseId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: SelfServiceActionInput) => recordSelfServiceAction(caseId, input),
+    onSuccess: async (lawCase) => {
+      queryClient.setQueryData(caseKeys.detail(caseId), lawCase);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: caseKeys.lists }),
+        queryClient.invalidateQueries({ queryKey: caseKeys.workItems(caseId) }),
         queryClient.invalidateQueries({ queryKey: caseKeys.messages })
       ]);
     }

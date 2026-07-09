@@ -24,6 +24,24 @@ ReviewNextAction = Literal[
 LegalDocumentType = Literal["lawyer_letter", "arbitration_material", "contract_review_opinion"]
 LegalDocumentStatus = Literal["draft", "pending_client_approval", "approved", "sent", "archived"]
 NotificationType = Literal["case", "task", "review", "document", "system"]
+SelfServiceAction = Literal[
+  "copy_template",
+  "download_template",
+  "mark_sent",
+  "upload_proof",
+  "record_response",
+  "close_case",
+  "upgrade_service",
+]
+SelfServiceResponse = Literal[
+  "paid",
+  "promised",
+  "installment",
+  "rejected",
+  "no_response",
+  "need_review",
+  "completed",
+]
 CaseStageKey = Literal[
   "submit",
   "evidence",
@@ -329,6 +347,13 @@ class CreateCaseInput(ApiModel):
 
 class SelectPlanInput(ApiModel):
   planId: PlanId
+
+
+class SelfServiceActionInput(ApiModel):
+  action: SelfServiceAction
+  channel: str | None = None
+  response: SelfServiceResponse | None = None
+  note: str | None = None
 
 
 class SubmitReviewInput(ApiModel):

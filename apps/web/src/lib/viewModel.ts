@@ -121,8 +121,18 @@ export function deriveMessages(cases: LawCase[]): H5Message[] {
 }
 
 export function deriveLatestProgress(lawCase: LawCase, events: CaseEvent[] = []) {
-  const latestEvent = events[0];
   const activeStage = lawCase.stages.find((stage) => stage.status === 'active') ?? lawCase.stages.at(-1);
+  const selfServiceStage = lawCase.selectedPlan === 'self-service' ? lawCase.stages.find((stage) => stage.key === 'letter') : null;
+  const latestEvent = events.find((event) => event.type !== 'stage.changed' || event.title !== '发送律师函');
+
+  if (selfServiceStage && selfServiceStage.status === 'active') {
+    return {
+      title: selfServiceStage.title,
+      body: selfServiceStage.description,
+      time: selfServiceStage.at ?? formatDate(lawCase.createdAt),
+      href: `/cases/${lawCase.id}`
+    };
+  }
 
   if (latestEvent) {
     return {

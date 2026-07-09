@@ -42,6 +42,7 @@ from app.schemas import (
   NotificationMessage,
   PlanId,
   ReviewOpinion,
+  SelfServiceActionInput,
   SubmitReviewInput,
   UpdateDocumentInput,
   User,
@@ -118,6 +119,7 @@ class AppStore(Protocol):
   ) -> EvidenceFile | None: ...
   def start_case_assessment(self, user_id: str, case_id: str) -> AssessmentJob | None: ...
   def select_plan(self, user_id: str, case_id: str, plan_id: PlanId) -> LawCase | None: ...
+  def record_self_service_action(self, user_id: str, case_id: str, input_data: SelfServiceActionInput) -> LawCase | None: ...
   def list_messages(self, user_id: str) -> list[NotificationMessage]: ...
   def mark_message_read(self, user_id: str, message_id: str) -> NotificationMessage | None: ...
   def list_case_work_items(self, user_id: str, case_id: str) -> list[WorkItem] | None: ...
@@ -451,6 +453,30 @@ class InMemoryStore:
     self._create_plan_follow_up(law_case, user_id, plan_id, self_service_payload)
     return law_case
 
+  def record_self_service_action(self, user_id: str, case_id: str, input_data: SelfServiceActionInput) -> LawCase | None:
+    law_case = self.get_case(user_id, case_id)
+    if law_case is None:
+      return None
+    if law_case.selectedPlan != "self-service":
+      raise InvalidStateError("SELF_SERVICE_REQUIRED")
+
+    completed_at = _format_datetime(_now())
+    title, message, payload = _apply_self_service_action(law_case, input_data, completed_at)
+    task_status = _self_service_work_item_status(input_data)
+    for task in self._work_items.values():
+      if task.caseId == case_id and task.kind == "ai_guidance":
+        task.status = task_status
+        task.updatedAt = _iso(_now())
+    self._record_event(law_case.id, "stage.changed", title, message, payload)
+    self._record_event(
+      law_case.id,
+      "task.updated",
+      "AI自助任务已更新",
+      law_case.status,
+      {"action": input_data.action, "status": task_status},
+    )
+    return law_case
+
   def list_messages(self, user_id: str) -> list[NotificationMessage]:
     messages = [message for message in self._messages.values() if message.recipientUserId == user_id]
     return sorted(messages, key=lambda item: item.createdAt, reverse=True)
@@ -475,7 +501,11 @@ class InMemoryStore:
     if self.get_case(user_id, case_id) is None:
       return None
     return sorted(
-      [document for document in self._documents.values() if document.caseId == case_id],
+      [
+        document
+        for document in self._documents.values()
+        if document.caseId == case_id and document.status in ("pending_client_approval", "approved", "sent")
+      ],
       key=lambda item: item.updatedAt,
       reverse=True,
     )
@@ -814,8 +844,8 @@ class InMemoryStore:
   ) -> None:
     if plan_id == "self-service":
       payload = self_service_payload or build_self_service_payload(law_case)
-      task = _new_work_item(law_case.id, "ai_guidance", "AI自助任务", payload.taskSummary)
-      task.status = "completed"
+      task = _new_work_item(law_case.id, "ai_guidance", "AI自助处理包", payload.taskSummary)
+      task.status = "in_progress"
       task.updatedAt = _iso(_now())
       self._work_items[task.id] = task
       document = _new_document(
@@ -841,7 +871,7 @@ class InMemoryStore:
       self._record_event(
         law_case.id,
         "task.updated",
-        "AI自助任务已完成",
+        "AI自助处理包已生成",
         payload.taskSummary,
         {"workItemId": task.id},
       )
@@ -1352,6 +1382,45 @@ class PostgresStore:
       conn.commit()
     return law_case
 
+  def record_self_service_action(self, user_id: str, case_id: str, input_data: SelfServiceActionInput) -> LawCase | None:
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute("SELECT * FROM cases WHERE id = %s AND user_id = %s", (case_id, user_id))
+        row = cursor.fetchone()
+        if row is None:
+          conn.rollback()
+          return None
+        law_case = self._case_from_row(cursor, row)
+        if law_case.selectedPlan != "self-service":
+          conn.rollback()
+          raise InvalidStateError("SELF_SERVICE_REQUIRED")
+
+        completed_at = _format_datetime(_now())
+        title, message, payload = _apply_self_service_action(law_case, input_data, completed_at)
+        task_status = _self_service_work_item_status(input_data)
+        self._update_case_state(cursor, law_case)
+        cursor.execute(
+          """
+          UPDATE work_items
+          SET status = %s, updated_at = %s
+          WHERE case_id = %s AND kind = 'ai_guidance'
+          """,
+          (task_status, _iso(_now()), case_id),
+        )
+        self._insert_event(cursor, _new_event(law_case.id, "stage.changed", title, message, payload))
+        self._insert_event(
+          cursor,
+          _new_event(
+            law_case.id,
+            "task.updated",
+            "AI自助任务已更新",
+            law_case.status,
+            {"action": input_data.action, "status": task_status},
+          ),
+        )
+      conn.commit()
+    return law_case
+
   def list_messages(self, user_id: str) -> list[NotificationMessage]:
     with self.database.connection() as conn:
       with conn.cursor(row_factory=dict_row) as cursor:
@@ -1395,7 +1464,14 @@ class PostgresStore:
       return None
     with self.database.connection() as conn:
       with conn.cursor(row_factory=dict_row) as cursor:
-        cursor.execute("SELECT * FROM legal_documents WHERE case_id = %s ORDER BY updated_at DESC", (case_id,))
+        cursor.execute(
+          """
+          SELECT * FROM legal_documents
+          WHERE case_id = %s AND status IN ('pending_client_approval', 'approved', 'sent')
+          ORDER BY updated_at DESC
+          """,
+          (case_id,),
+        )
         rows = cursor.fetchall()
       conn.rollback()
     return [_document_from_row(row) for row in rows]
@@ -1998,8 +2074,8 @@ class PostgresStore:
   ) -> None:
     if plan_id == "self-service":
       payload = self_service_payload or build_self_service_payload(law_case)
-      task = _new_work_item(law_case.id, "ai_guidance", "AI自助任务", payload.taskSummary)
-      task.status = "completed"
+      task = _new_work_item(law_case.id, "ai_guidance", "AI自助处理包", payload.taskSummary)
+      task.status = "in_progress"
       task.updatedAt = _iso(_now())
       self._insert_work_item(cursor, task)
       document = _new_document(
@@ -2031,7 +2107,7 @@ class PostgresStore:
         _new_event(
           law_case.id,
           "task.updated",
-          "AI自助任务已完成",
+          "AI自助处理包已生成",
           payload.taskSummary,
           {"workItemId": task.id},
         ),
@@ -2373,6 +2449,86 @@ def _missing_required_evidence(law_case: LawCase) -> list[str]:
 def _require_required_evidence(law_case: LawCase) -> None:
   if _missing_required_evidence(law_case):
     raise InvalidStateError("REQUIRED_EVIDENCE_MISSING")
+
+
+def _stage(law_case: LawCase, stage_key: str) -> CaseStage | None:
+  return next((item for item in law_case.stages if item.key == stage_key), None)
+
+
+def _set_stage(law_case: LawCase, stage_key: str, status: str, description: str, at: str | None = None) -> None:
+  stage = _stage(law_case, stage_key)
+  if stage is None:
+    return
+  stage.status = status
+  stage.description = description
+  stage.at = at if status == "done" else None
+
+
+def _complete_self_service_document_stage(law_case: LawCase, completed_at: str) -> None:
+  _set_stage(law_case, "letter", "done", "AI自助处理包已使用并记录结果", completed_at)
+
+
+def _activate_self_service_response_stage(law_case: LawCase) -> None:
+  _set_stage(law_case, "negotiation", "active", "等待对方回应，继续保留送达、沟通和履行记录")
+
+
+def _close_self_service_filing_stage(law_case: LawCase, completed_at: str) -> None:
+  _set_stage(law_case, "filing", "done", "自助处理已完成，无需继续准备立案材料", completed_at)
+
+
+def _apply_self_service_action(law_case: LawCase, input_data: SelfServiceActionInput, completed_at: str) -> tuple[str, str, dict[str, Any]]:
+  payload = {
+    "action": input_data.action,
+    "channel": input_data.channel,
+    "response": input_data.response,
+    "note": input_data.note,
+  }
+  if input_data.action == "copy_template":
+    return "已复制自助模板", "用户已复制 AI 自助模板，可自行使用并记录处理结果。", payload
+  if input_data.action == "download_template":
+    return "已下载自助模板", "用户已下载 AI 自助模板，可自行使用并记录处理结果。", payload
+  if input_data.action in ("mark_sent", "upload_proof"):
+    law_case.status = "已自行处理，等待对方回应" if input_data.action == "mark_sent" else "已记录送达凭证，等待对方回应"
+    _complete_self_service_document_stage(law_case, completed_at)
+    _activate_self_service_response_stage(law_case)
+    title = "已记录自行处理" if input_data.action == "mark_sent" else "已记录送达凭证"
+    message = input_data.note or "用户已记录自行处理动作，等待对方回应。"
+    return title, message, payload
+  if input_data.action == "record_response":
+    _complete_self_service_document_stage(law_case, completed_at)
+    if input_data.response in ("paid", "completed"):
+      law_case.status = "已完成自助处理"
+      _set_stage(law_case, "negotiation", "done", "已记录对方履行或处理完成", completed_at)
+      _close_self_service_filing_stage(law_case, completed_at)
+      _set_stage(law_case, "recovery", "done", "已确认回款或自助处理完成", completed_at)
+      return "自助处理已完成", input_data.note or "用户已记录自助处理完成。", payload
+    if input_data.response in ("promised", "installment"):
+      law_case.status = "对方承诺履行，继续跟进"
+      _activate_self_service_response_stage(law_case)
+      return "对方承诺履行", input_data.note or "用户已记录对方承诺履行，继续跟进。", payload
+    law_case.status = "建议准备材料或升级人工服务"
+    _set_stage(law_case, "negotiation", "done", "已记录对方拒绝、无回应或需人工复核", completed_at)
+    _set_stage(law_case, "filing", "active", "可整理材料包，或升级人工复核/代办服务")
+    return "建议准备材料或升级人工服务", input_data.note or "用户已记录对方无回应、拒绝或需人工复核。", payload
+  if input_data.action == "close_case":
+    law_case.status = "已完成自助处理"
+    _complete_self_service_document_stage(law_case, completed_at)
+    _set_stage(law_case, "negotiation", "done", "用户已确认自助处理完成", completed_at)
+    _close_self_service_filing_stage(law_case, completed_at)
+    _set_stage(law_case, "recovery", "done", "用户已确认结案", completed_at)
+    return "自助案件已结案", input_data.note or "用户已确认自助处理完成。", payload
+  if input_data.action == "upgrade_service":
+    law_case.status = "已申请升级人工服务"
+    return "已申请升级人工服务", input_data.note or "用户已申请升级人工复核或代办服务。", payload
+  return "自助动作已记录", input_data.note or "用户已记录自助处理动作。", payload
+
+
+def _self_service_work_item_status(input_data: SelfServiceActionInput) -> str:
+  if input_data.action in ("close_case", "upgrade_service"):
+    return "completed"
+  if input_data.action == "record_response" and input_data.response in ("paid", "completed"):
+    return "completed"
+  return "in_progress"
 
 
 def _document_field_value(document: LegalDocument, field_name: str) -> str:
