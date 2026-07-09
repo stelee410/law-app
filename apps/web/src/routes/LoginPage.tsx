@@ -1,5 +1,5 @@
 import { Link, useNavigate } from '@tanstack/react-router';
-import { ShieldCheck, Smartphone, UserPlus } from 'lucide-react';
+import { KeyRound, ShieldCheck, Smartphone, UserPlus } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import brandLogo from '../assets/brand-logo.png';
 import loginHero from '../assets/login-hero.png';
@@ -9,13 +9,15 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginMode, setLoginMode] = useState<'code' | 'password'>('code');
   const requestCode = useRequestCodeMutation();
   const login = useLoginMutation();
   const enableDemoLogin = import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true';
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const session = await login.mutateAsync({ phone, code });
+    const session = await login.mutateAsync(loginMode === 'password' ? { mode: 'password', phone, password } : { mode: 'code', phone, code });
     if (session.user.role === 'admin') {
       await navigate({ to: '/admin' });
       return;
@@ -70,6 +72,22 @@ export function LoginPage() {
       />
 
       <form className="space-y-4 rounded-lg border border-white bg-white p-4 shadow-xl shadow-slate-200/70" onSubmit={handleSubmit}>
+        <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
+          <button
+            className={`h-10 rounded-md text-sm font-black ${loginMode === 'code' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'}`}
+            type="button"
+            onClick={() => setLoginMode('code')}
+          >
+            验证码登录
+          </button>
+          <button
+            className={`h-10 rounded-md text-sm font-black ${loginMode === 'password' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'}`}
+            type="button"
+            onClick={() => setLoginMode('password')}
+          >
+            密码登录
+          </button>
+        </div>
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">手机号</span>
           <input
@@ -80,7 +98,8 @@ export function LoginPage() {
             placeholder="13800001234"
           />
         </label>
-        <label className="block">
+        {loginMode === 'code' ? (
+          <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">验证码</span>
           <div className="flex gap-2">
             <input
@@ -99,19 +118,32 @@ export function LoginPage() {
               获取
             </button>
           </div>
-        </label>
-        {requestCode.data?.mockCode && (
+          </label>
+        ) : (
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">密码</span>
+            <input
+              className="h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 text-base outline-none focus:border-blue-500 focus:bg-white"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="至少 8 位"
+            />
+          </label>
+        )}
+        {loginMode === 'code' && requestCode.data?.mockCode && (
           <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
             测试验证码：{requestCode.data.mockCode}
           </div>
         )}
-        {login.isError && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">登录失败，请检查验证码。</div>}
+        {login.isError && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">登录失败，请检查账号信息。</div>}
         <button
           className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 text-base font-black text-white shadow-lg shadow-blue-200 disabled:opacity-50"
           type="submit"
-          disabled={phone.length < 6 || code.length < 4 || login.isPending}
+          disabled={phone.length < 6 || (loginMode === 'password' ? password.length < 8 : code.length < 4) || login.isPending}
         >
-          <Smartphone size={18} />
+          {loginMode === 'password' ? <KeyRound size={18} /> : <Smartphone size={18} />}
           登录
         </button>
       </form>

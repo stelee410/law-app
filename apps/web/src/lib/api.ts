@@ -15,6 +15,7 @@ import type {
   LawCase,
   NotificationMessage,
   OtpResponse,
+  PasswordLoginInput,
   PlanId,
   ReviewOpinion,
   SelfServiceActionInput,
@@ -75,6 +76,10 @@ export async function requestLoginCode(phone: string): Promise<OtpResponse> {
 
 export async function loginWithCode(phone: string, code: string): Promise<AuthToken> {
   return api.post(apiUrl('/auth/login'), { json: { phone, code } }).json<AuthToken>();
+}
+
+export async function loginWithPassword(input: PasswordLoginInput): Promise<AuthToken> {
+  return api.post(apiUrl('/auth/login/password'), { json: input }).json<AuthToken>();
 }
 
 export async function registerClient(input: ClientRegisterInput): Promise<AuthToken> {

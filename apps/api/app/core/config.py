@@ -41,6 +41,7 @@ class Settings(BaseSettings):
   LOG_FORMAT: Literal["console", "json"] = "console"
   ADMIN_PHONE: str | None = None
   ADMIN_NAME: str | None = None
+  ADMIN_PASSWORD: SecretStr | None = None
 
   model_config = SettingsConfigDict(env_file=(".env", "apps/api/.env"), extra="ignore")
 

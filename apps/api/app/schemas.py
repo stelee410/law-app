@@ -265,8 +265,13 @@ class LoginInput(RequestCodeInput):
   code: str = Field(min_length=4)
 
 
+class PasswordLoginInput(RequestCodeInput):
+  password: str = Field(min_length=8, max_length=128)
+
+
 class ClientRegisterInput(LoginInput):
   name: str = Field(min_length=1)
+  password: str | None = Field(default=None, min_length=8, max_length=128)
   acceptedTerms: bool
   acceptedPrivacy: bool
 

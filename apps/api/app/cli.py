@@ -4,11 +4,11 @@ from app.core.config import Settings
 from app.main import create_store
 
 
-def create_admin(phone: str, name: str) -> None:
+def create_admin(phone: str, name: str, password: str | None = None) -> None:
   settings = Settings()
   store, database = create_store(settings)
   try:
-    user = store.create_admin(phone, name)
+    user = store.create_admin(phone, name, password)
     print(f"created admin {user.phone} {user.name}")
   finally:
     if database is not None:
@@ -22,10 +22,11 @@ def main() -> None:
   create_admin_parser = subparsers.add_parser("create-admin")
   create_admin_parser.add_argument("--phone", required=True)
   create_admin_parser.add_argument("--name", required=True)
+  create_admin_parser.add_argument("--password")
 
   args = parser.parse_args()
   if args.command == "create-admin":
-    create_admin(args.phone, args.name)
+    create_admin(args.phone, args.name, args.password)
 
 
 if __name__ == "__main__":

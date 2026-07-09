@@ -34,6 +34,7 @@ services:
       LANGFUSE_HOST: ${LANGFUSE_HOST:-}
       ADMIN_PHONE: ${ADMIN_PHONE:-}
       ADMIN_NAME: ${ADMIN_NAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-console}
     volumes:

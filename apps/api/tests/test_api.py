@@ -7,6 +7,7 @@ os.environ["OPENAI_API_KEY"] = ""
 os.environ["DEFAULT_LLM_MODEL"] = ""
 
 from fastapi.testclient import TestClient
+import jwt
 
 from app import store as store_module
 from app.core.config import Settings
@@ -144,6 +145,92 @@ def test_plan_selection_is_idempotent_and_rejects_switching() -> None:
   )
   assert switched.status_code == 409
   assert switched.json()["detail"] == "INVALID_STATE"
+
+
+def test_password_login_supports_registered_clients() -> None:
+  client = TestClient(create_app(_test_settings()))
+  _register_client(client, phone="13800001234", password="ClientPass123!")
+
+  login_response = client.post(
+    "/api/v1/auth/login/password",
+    json={"phone": "13800001234", "password": "ClientPass123!"},
+  )
+
+  assert login_response.status_code == 200
+  token = login_response.json()["token"]
+  assert token.count(".") == 2
+  payload = jwt.decode(token, options={"verify_signature": False})
+  assert payload["sub"]
+  headers = {"Authorization": f"Bearer {token}"}
+  me_response = client.get("/api/v1/me", headers=headers)
+  assert me_response.status_code == 200
+  assert me_response.json()["user"]["phone"] == "13800001234"
+
+
+def test_password_login_rejects_wrong_or_missing_password() -> None:
+  client = TestClient(create_app(_test_settings()))
+  _register_client(client, phone="13800001234", password="ClientPass123!")
+  _register_client(client, phone="13800005555")
+
+  wrong_password = client.post(
+    "/api/v1/auth/login/password",
+    json={"phone": "13800001234", "password": "wrong-password"},
+  )
+  missing_hash = client.post(
+    "/api/v1/auth/login/password",
+    json={"phone": "13800005555", "password": "ClientPass123!"},
+  )
+
+  assert wrong_password.status_code == 401
+  assert wrong_password.json()["detail"] == "INVALID_CREDENTIALS"
+  assert missing_hash.status_code == 401
+  assert missing_hash.json()["detail"] == "INVALID_CREDENTIALS"
+
+
+def test_password_login_rejects_disabled_users() -> None:
+  client = TestClient(create_app(_test_settings()))
+  headers = _register_client(client, phone="13800001234", password="ClientPass123!")
+  user_id = client.get("/api/v1/me", headers=headers).json()["user"]["id"]
+  client.app.state.store._users_by_id[user_id].accountStatus = "disabled"
+
+  response = client.post(
+    "/api/v1/auth/login/password",
+    json={"phone": "13800001234", "password": "ClientPass123!"},
+  )
+
+  assert response.status_code == 403
+  assert response.json()["detail"] == "ACCOUNT_DISABLED"
+
+
+def test_admin_bootstrap_password_can_login_admin() -> None:
+  settings = _test_settings(ADMIN_PHONE="13600000000", ADMIN_NAME="平台管理员", ADMIN_PASSWORD="AdminPass123!")
+  client = TestClient(create_app(settings))
+
+  response = client.post(
+    "/api/v1/auth/login/password",
+    json={"phone": settings.ADMIN_PHONE, "password": "AdminPass123!"},
+  )
+
+  assert response.status_code == 200
+  assert response.json()["user"]["role"] == "admin"
+
+
+def test_pending_lawyer_password_login_keeps_lawyer_api_locked() -> None:
+  client = TestClient(create_app(_test_settings()))
+  _onboard_lawyer(client, phone="13900008888", password="LawyerPass123!")
+
+  response = client.post(
+    "/api/v1/auth/login/password",
+    json={"phone": "13900008888", "password": "LawyerPass123!"},
+  )
+
+  assert response.status_code == 200
+  assert response.json()["user"]["role"] == "lawyer"
+  assert response.json()["user"]["lawyerReviewStatus"] == "pending_review"
+  lawyer_headers = {"Authorization": f"Bearer {response.json()['token']}"}
+  tasks = client.get("/api/v1/lawyer/tasks", headers=lawyer_headers)
+  assert tasks.status_code == 403
+  assert tasks.json()["detail"] == "LAWYER_NOT_APPROVED"
 
 
 def test_lawyer_review_document_closed_loop() -> None:
@@ -849,38 +936,44 @@ def _request_code(client: TestClient, phone: str) -> str:
   return code_response.json()["mockCode"]
 
 
-def _register_client(client: TestClient, phone: str = "13800001234", name: str = "王先生") -> dict[str, str]:
+def _register_client(client: TestClient, phone: str = "13800001234", name: str = "王先生", password: str | None = None) -> dict[str, str]:
   code = _request_code(client, phone)
+  payload = {
+    "phone": phone,
+    "code": code,
+    "name": name,
+    "acceptedTerms": True,
+    "acceptedPrivacy": True,
+  }
+  if password is not None:
+    payload["password"] = password
   response = client.post(
     "/api/v1/auth/register/client",
-    json={
-      "phone": phone,
-      "code": code,
-      "name": name,
-      "acceptedTerms": True,
-      "acceptedPrivacy": True,
-    },
+    json=payload,
   )
   assert response.status_code == 200
   token = response.json()["token"]
   return {"Authorization": f"Bearer {token}"}
 
 
-def _onboard_lawyer(client: TestClient, phone: str = "13900008888") -> dict[str, str]:
+def _onboard_lawyer(client: TestClient, phone: str = "13900008888", password: str | None = None) -> dict[str, str]:
   code = _request_code(client, phone)
+  payload = {
+    "phone": phone,
+    "code": code,
+    "name": "赵律师",
+    "lawFirm": "北京中正律师事务所",
+    "licenseNumber": "11101202010123456",
+    "practiceRegion": "北京",
+    "specialties": ["合同纠纷", "债务催收"],
+    "acceptedTerms": True,
+    "acceptedPrivacy": True,
+  }
+  if password is not None:
+    payload["password"] = password
   response = client.post(
     "/api/v1/auth/onboard-lawyer",
-    json={
-      "phone": phone,
-      "code": code,
-      "name": "赵律师",
-      "lawFirm": "北京中正律师事务所",
-      "licenseNumber": "11101202010123456",
-      "practiceRegion": "北京",
-      "specialties": ["合同纠纷", "债务催收"],
-      "acceptedTerms": True,
-      "acceptedPrivacy": True,
-    },
+    json=payload,
   )
   assert response.status_code == 200
   token = response.json()["token"]

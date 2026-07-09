@@ -19,6 +19,7 @@ import {
   getMe,
   getMessages,
   loginWithCode,
+  loginWithPassword,
   markMessageRead,
   onboardLawyer,
   recordSelfServiceAction,
@@ -40,6 +41,7 @@ import type {
   CreateCaseInput,
   LawCase,
   LawyerOnboardingInput,
+  PasswordLoginInput,
   PlanId,
   SelfServiceActionInput,
   SubmitReviewInput,
@@ -201,7 +203,13 @@ export function useLoginMutation() {
   const queryClient = useQueryClient();
   const setSession = useAuthStore((state) => state.setSession);
   return useMutation({
-    mutationFn: ({ phone, code }: { phone: string; code: string }) => loginWithCode(phone, code),
+    mutationFn: (input: ({ mode: 'code'; code: string } | { mode: 'password'; password: string }) & { phone: string }) => {
+      if (input.mode === 'password') {
+        const passwordInput: PasswordLoginInput = { phone: input.phone, password: input.password };
+        return loginWithPassword(passwordInput);
+      }
+      return loginWithCode(input.phone, input.code);
+    },
     onSuccess: async (session) => {
       setSession(session);
       queryClient.setQueryData(caseKeys.me, session.user);

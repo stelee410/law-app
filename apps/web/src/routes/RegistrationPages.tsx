@@ -18,13 +18,21 @@ export function ClientRegistrationPage() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   const [consent, setConsent] = useState<ConsentState>({ acceptedTerms: false, acceptedPrivacy: false });
-  const canSubmit = name.trim().length > 0 && phone.length >= 6 && code.length >= 4 && consent.acceptedTerms && consent.acceptedPrivacy;
+  const canSubmit = name.trim().length > 0 && phone.length >= 6 && code.length >= 4 && password.length >= 8 && confirmPassword.length >= 8 && consent.acceptedTerms && consent.acceptedPrivacy;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit) return;
-    await registerClient.mutateAsync({ phone, code, name, ...consent });
+    if (password !== confirmPassword) {
+      setPasswordError('两次输入的密码不一致');
+      return;
+    }
+    setPasswordError('');
+    await registerClient.mutateAsync({ phone, code, name, password, ...consent });
     await navigate({ to: '/' });
   }
 
@@ -33,8 +41,11 @@ export function ClientRegistrationPage() {
       <form className="space-y-4" onSubmit={handleSubmit}>
         <TextField label="姓名" value={name} onChange={setName} placeholder="王先生" />
         <CodeFields phone={phone} code={code} setPhone={setPhone} setCode={setCode} requestCode={() => requestCode.mutate(phone)} disabled={phone.length < 6 || requestCode.isPending} />
+        <TextField label="设置密码" value={password} onChange={setPassword} placeholder="至少 8 位" type="password" autoComplete="new-password" />
+        <TextField label="确认密码" value={confirmPassword} onChange={setConfirmPassword} placeholder="再次输入密码" type="password" autoComplete="new-password" />
         <ConsentFields consent={consent} setConsent={setConsent} />
         {requestCode.data?.mockCode && <Hint>测试验证码：{requestCode.data.mockCode}</Hint>}
+        {passwordError && <ErrorText>{passwordError}</ErrorText>}
         {registerClient.isError && <ErrorText>注册失败，请检查验证码和必填信息。</ErrorText>}
         <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white disabled:opacity-50" type="submit" disabled={!canSubmit || registerClient.isPending}>
           <Send size={18} />
@@ -52,6 +63,9 @@ export function LawyerOnboardingPage() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   const [lawFirm, setLawFirm] = useState('');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [practiceRegion, setPracticeRegion] = useState('');
@@ -62,6 +76,8 @@ export function LawyerOnboardingPage() {
     name.trim().length > 0 &&
     phone.length >= 6 &&
     code.length >= 4 &&
+    password.length >= 8 &&
+    confirmPassword.length >= 8 &&
     lawFirm.trim().length > 0 &&
     licenseNumber.trim().length > 0 &&
     practiceRegion.trim().length > 0 &&
@@ -72,10 +88,16 @@ export function LawyerOnboardingPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit) return;
+    if (password !== confirmPassword) {
+      setPasswordError('两次输入的密码不一致');
+      return;
+    }
+    setPasswordError('');
     await onboardLawyer.mutateAsync({
       phone,
       code,
       name,
+      password,
       lawFirm,
       licenseNumber,
       practiceRegion,
@@ -90,12 +112,15 @@ export function LawyerOnboardingPage() {
       <form className="space-y-4" onSubmit={handleSubmit}>
         <TextField label="姓名" value={name} onChange={setName} placeholder="赵律师" />
         <CodeFields phone={phone} code={code} setPhone={setPhone} setCode={setCode} requestCode={() => requestCode.mutate(phone)} disabled={phone.length < 6 || requestCode.isPending} />
+        <TextField label="设置密码" value={password} onChange={setPassword} placeholder="至少 8 位" type="password" autoComplete="new-password" />
+        <TextField label="确认密码" value={confirmPassword} onChange={setConfirmPassword} placeholder="再次输入密码" type="password" autoComplete="new-password" />
         <TextField label="律所" value={lawFirm} onChange={setLawFirm} placeholder="某某律师事务所" />
         <TextField label="执业证号" value={licenseNumber} onChange={setLicenseNumber} placeholder="11101202010123456" />
         <TextField label="执业地区" value={practiceRegion} onChange={setPracticeRegion} placeholder="上海" />
         <TextField label="擅长领域" value={specialtiesText} onChange={setSpecialtiesText} placeholder="合同纠纷,债务催收" />
         <ConsentFields consent={consent} setConsent={setConsent} />
         {requestCode.data?.mockCode && <Hint>测试验证码：{requestCode.data.mockCode}</Hint>}
+        {passwordError && <ErrorText>{passwordError}</ErrorText>}
         {onboardLawyer.isError && <ErrorText>入驻提交失败，请检查验证码和必填信息。</ErrorText>}
         <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white disabled:opacity-50" type="submit" disabled={!canSubmit || onboardLawyer.isPending}>
           <ShieldCheck size={18} />
@@ -169,11 +194,27 @@ function CodeFields({
   );
 }
 
-function TextField({ label, value, onChange, placeholder, inputMode }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; inputMode?: 'tel' | 'numeric' }) {
+function TextField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  inputMode,
+  type = 'text',
+  autoComplete
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  inputMode?: 'tel' | 'numeric';
+  type?: 'text' | 'password';
+  autoComplete?: string;
+}) {
   return (
     <label className="block">
       <span className="mb-2 block text-sm font-black text-slate-700">{label}</span>
-      <input className="h-12 w-full rounded-lg bg-slate-50 px-4 outline-none focus:ring-2 focus:ring-blue-500" inputMode={inputMode} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+      <input className="h-12 w-full rounded-lg bg-slate-50 px-4 outline-none focus:ring-2 focus:ring-blue-500" inputMode={inputMode} type={type} autoComplete={autoComplete} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
     </label>
   );
 }

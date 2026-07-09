@@ -18,6 +18,7 @@ from app.schemas import (
   CreateDocumentInput,
   LawyerOnboardingInput,
   LoginInput,
+  PasswordLoginInput,
   RequestCodeInput,
   SelectPlanInput,
   SelfServiceActionInput,
@@ -109,6 +110,20 @@ def login(
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_DISABLED") from exc
   if session is None:
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="INVALID_CODE")
+  return session
+
+
+@router.post("/auth/login/password")
+def login_password(
+  payload: PasswordLoginInput,
+  store: Annotated[AppStore, Depends(_get_store)],
+):
+  try:
+    session = auth_service.login_with_password(store, payload.phone, payload.password)
+  except AccountDisabledError as exc:
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_DISABLED") from exc
+  if session is None:
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="INVALID_CREDENTIALS")
   return session
 
 

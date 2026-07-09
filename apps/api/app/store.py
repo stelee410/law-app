@@ -20,6 +20,7 @@ from app.cases.self_service import (
   build_self_service_payload,
   ensure_ai_notice,
 )
+from app.auth.security import create_access_token, decode_access_token, hash_password, verify_password
 from app.core.config import Settings
 from app.core.database import Database
 from app.schemas import (
@@ -95,10 +96,11 @@ class AppStore(Protocol):
 
   def request_login_code(self, phone: str) -> dict[str, str]: ...
   def login_with_code(self, phone: str, code: str) -> AuthToken | None: ...
+  def login_with_password(self, phone: str, password: str) -> AuthToken | None: ...
   def register_client(self, input_data: ClientRegisterInput) -> AuthToken | None: ...
   def onboard_lawyer(self, input_data: LawyerOnboardingInput) -> AuthToken | None: ...
   def get_user_by_token(self, token: str) -> User | None: ...
-  def create_admin(self, phone: str, name: str) -> User: ...
+  def create_admin(self, phone: str, name: str, password: str | None = None) -> User: ...
   def list_admin_users(self) -> list[User]: ...
   def update_user_admin(self, user_id: str, input_data: AdminUpdateUserInput) -> User | None: ...
   def list_lawyer_applications(self) -> list[User]: ...
@@ -167,6 +169,7 @@ class InMemoryStore:
     self._otps: dict[str, tuple[str, datetime]] = {}
     self._users_by_phone: dict[str, User] = {}
     self._users_by_id: dict[str, User] = {}
+    self._password_hashes_by_user_id: dict[str, str] = {}
     self._sessions: dict[str, tuple[str, datetime]] = {}
     self._cases: dict[str, LawCase] = {}
     self._events: dict[str, list[CaseEvent]] = {}
@@ -202,6 +205,17 @@ class InMemoryStore:
       raise AccountDisabledError("ACCOUNT_DISABLED")
     return self._create_session(user)
 
+  def login_with_password(self, phone: str, password: str) -> AuthToken | None:
+    normalized_phone = _normalize_phone(phone)
+    user = self._users_by_phone.get(normalized_phone)
+    if user is None:
+      return None
+    if user.accountStatus == "disabled":
+      raise AccountDisabledError("ACCOUNT_DISABLED")
+    if not verify_password(password, self._password_hashes_by_user_id.get(user.id)):
+      return None
+    return self._create_session(user)
+
   def register_client(self, input_data: ClientRegisterInput) -> AuthToken | None:
     normalized_phone = _normalize_phone(input_data.phone)
     if not self._verify_otp(normalized_phone, input_data.code):
@@ -230,6 +244,8 @@ class InMemoryStore:
       user.updatedAt = now
     self._users_by_phone[normalized_phone] = user
     self._users_by_id[user.id] = user
+    if input_data.password is not None:
+      self._password_hashes_by_user_id[user.id] = hash_password(input_data.password)
     return self._create_session(user)
 
   def onboard_lawyer(self, input_data: LawyerOnboardingInput) -> AuthToken | None:
@@ -269,19 +285,28 @@ class InMemoryStore:
       user.updatedAt = now
     self._users_by_phone[normalized_phone] = user
     self._users_by_id[user.id] = user
+    if input_data.password is not None:
+      self._password_hashes_by_user_id[user.id] = hash_password(input_data.password)
     return self._create_session(user)
 
   def get_user_by_token(self, token: str) -> User | None:
+    try:
+      user_id = decode_access_token(self.settings, token)
+    except Exception:
+      user_id = None
     session = self._sessions.get(token)
     if session is None:
       return None
-    user_id, expires_at = session
+    session_user_id, expires_at = session
     if expires_at < _now():
       self._sessions.pop(token, None)
       return None
+    if user_id is not None and user_id != session_user_id:
+      return None
+    user_id = user_id or session_user_id
     return self._users_by_id.get(user_id)
 
-  def create_admin(self, phone: str, name: str) -> User:
+  def create_admin(self, phone: str, name: str, password: str | None = None) -> User:
     normalized_phone = _normalize_phone(phone)
     user = self._users_by_phone.get(normalized_phone)
     now = _iso(_now())
@@ -305,6 +330,8 @@ class InMemoryStore:
       user.updatedAt = now
     self._users_by_phone[normalized_phone] = user
     self._users_by_id[user.id] = user
+    if password is not None:
+      self._password_hashes_by_user_id[user.id] = hash_password(password)
     return user
 
   def list_admin_users(self) -> list[User]:
@@ -806,8 +833,7 @@ class InMemoryStore:
     return expected_code == code and expires_at >= _now()
 
   def _create_session(self, user: User) -> AuthToken:
-    token = _create_token()
-    session_expires_at = _now() + timedelta(days=self.settings.TOKEN_EXPIRE_DAYS)
+    token, session_expires_at = create_access_token(self.settings, subject=user.id)
     self._sessions[token] = (user.id, session_expires_at)
     return AuthToken(token=token, user=user, expiresAt=_iso(session_expires_at))
 
@@ -976,12 +1002,27 @@ class PostgresStore:
         if user.accountStatus == "disabled":
           conn.rollback()
           raise AccountDisabledError("ACCOUNT_DISABLED")
-        token = _create_token()
-        expires_at = _now() + timedelta(days=self.settings.TOKEN_EXPIRE_DAYS)
-        cursor.execute(
-          "INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (%s, %s, %s, %s)",
-          (token, user.id, _iso(expires_at), _iso(_now())),
-        )
+        token, expires_at = self._insert_session(cursor, user.id)
+      conn.commit()
+    return AuthToken(token=token, user=user, expiresAt=_iso(expires_at))
+
+  def login_with_password(self, phone: str, password: str) -> AuthToken | None:
+    normalized_phone = _normalize_phone(phone)
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute("SELECT * FROM users WHERE phone = %s", (normalized_phone,))
+        row = cursor.fetchone()
+        if row is None:
+          conn.rollback()
+          return None
+        user = _user_from_row(row)
+        if user.accountStatus == "disabled":
+          conn.rollback()
+          raise AccountDisabledError("ACCOUNT_DISABLED")
+        if not verify_password(password, row.get("password_hash")):
+          conn.rollback()
+          return None
+        token, expires_at = self._insert_session(cursor, user.id)
       conn.commit()
     return AuthToken(token=token, user=user, expiresAt=_iso(expires_at))
 
@@ -1007,6 +1048,7 @@ class PostgresStore:
             updatedAt=now,
           )
           self._insert_user(cursor, user)
+          self._set_user_password(cursor, user.id, input_data.password)
         else:
           user = _user_from_row(existing)
           if user.accountStatus == "disabled":
@@ -1019,6 +1061,7 @@ class PostgresStore:
             user.rejectedReason = None
           user.updatedAt = now
           self._update_user_row(cursor, user)
+          self._set_user_password(cursor, user.id, input_data.password)
         token, expires_at = self._insert_session(cursor, user.id)
       conn.commit()
     return AuthToken(token=token, user=user, expiresAt=_iso(expires_at))
@@ -1049,6 +1092,7 @@ class PostgresStore:
             updatedAt=now,
           )
           self._insert_user(cursor, user)
+          self._set_user_password(cursor, user.id, input_data.password)
         else:
           user = _user_from_row(existing)
           if user.accountStatus == "disabled":
@@ -1067,11 +1111,16 @@ class PostgresStore:
           user.specialties = input_data.specialties
           user.updatedAt = now
           self._update_user_row(cursor, user)
+          self._set_user_password(cursor, user.id, input_data.password)
         token, expires_at = self._insert_session(cursor, user.id)
       conn.commit()
     return AuthToken(token=token, user=user, expiresAt=_iso(expires_at))
 
   def get_user_by_token(self, token: str) -> User | None:
+    try:
+      jwt_user_id = decode_access_token(self.settings, token)
+    except Exception:
+      jwt_user_id = None
     with self.database.connection() as conn:
       with conn.cursor(row_factory=dict_row) as cursor:
         cursor.execute(
@@ -1091,10 +1140,13 @@ class PostgresStore:
           cursor.execute("DELETE FROM sessions WHERE token = %s", (token,))
           conn.commit()
           return None
+        if jwt_user_id is not None and jwt_user_id != row["id"]:
+          conn.rollback()
+          return None
       conn.rollback()
     return _user_from_row(row)
 
-  def create_admin(self, phone: str, name: str) -> User:
+  def create_admin(self, phone: str, name: str, password: str | None = None) -> User:
     normalized_phone = _normalize_phone(phone)
     with self.database.connection() as conn:
       with conn.cursor(row_factory=dict_row) as cursor:
@@ -1113,6 +1165,7 @@ class PostgresStore:
             updatedAt=now,
           )
           self._insert_user(cursor, user)
+          self._set_user_password(cursor, user.id, password)
         else:
           user = _user_from_row(row)
           user.name = name
@@ -1122,6 +1175,7 @@ class PostgresStore:
           user.rejectedReason = None
           user.updatedAt = now
           self._update_user_row(cursor, user)
+          self._set_user_password(cursor, user.id, password)
       conn.commit()
     return user
 
@@ -1849,8 +1903,7 @@ class PostgresStore:
     return otp is not None and otp["code"] == code and _parse_iso(otp["expires_at"]) >= _now()
 
   def _insert_session(self, cursor, user_id: str) -> tuple[str, datetime]:
-    token = _create_token()
-    expires_at = _now() + timedelta(days=self.settings.TOKEN_EXPIRE_DAYS)
+    token, expires_at = create_access_token(self.settings, subject=user_id)
     cursor.execute(
       "INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (%s, %s, %s, %s)",
       (token, user_id, _iso(expires_at), _iso(_now())),
@@ -1881,6 +1934,14 @@ class PostgresStore:
         user.createdAt,
         user.updatedAt or user.createdAt,
       ),
+    )
+
+  def _set_user_password(self, cursor, user_id: str, password: str | None) -> None:
+    if password is None:
+      return
+    cursor.execute(
+      "UPDATE users SET password_hash = %s, updated_at = %s WHERE id = %s",
+      (hash_password(password), _iso(_now()), user_id),
     )
 
   def _update_user_row(self, cursor, user: User) -> None:

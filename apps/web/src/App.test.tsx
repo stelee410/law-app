@@ -380,6 +380,8 @@ const testMessage = {
 let createdCasePayload: unknown;
 let adminUpdatePayload: Record<string, unknown> | undefined;
 let adminReviewPayload: Record<string, unknown> | undefined;
+let passwordLoginPayload: Record<string, unknown> | undefined;
+let clientRegisterPayload: Record<string, unknown> | undefined;
 
 beforeEach(() => {
   window.history.pushState({}, '', '/');
@@ -389,6 +391,8 @@ beforeEach(() => {
   createdCasePayload = undefined;
   adminUpdatePayload = undefined;
   adminReviewPayload = undefined;
+  passwordLoginPayload = undefined;
+  clientRegisterPayload = undefined;
   window.scrollTo = vi.fn();
   vi.stubGlobal(
     'fetch',
@@ -398,7 +402,12 @@ beforeEach(() => {
       if (url.endsWith('/api/v1/auth/request-code')) {
         return Promise.resolve(jsonResponse({ phone: '13800001234', mockCode: '654321', expiresAt: '2026-07-30T00:00:00.000Z' }));
       }
+      if (url.endsWith('/api/v1/auth/login/password')) {
+        passwordLoginPayload = input instanceof Request ? await input.clone().json() : JSON.parse(String(init?.body));
+        return Promise.resolve(jsonResponse({ token: 'client-token', user: testUser, expiresAt: '2026-07-30T00:00:00.000Z' }));
+      }
       if (url.endsWith('/api/v1/auth/register/client')) {
+        clientRegisterPayload = input instanceof Request ? await input.clone().json() : JSON.parse(String(init?.body));
         return Promise.resolve(jsonResponse({ token: 'client-token', user: testUser, expiresAt: '2026-07-30T00:00:00.000Z' }));
       }
       if (url.endsWith('/api/v1/auth/onboard-lawyer')) {
@@ -601,6 +610,26 @@ describe('App', () => {
     expect(screen.queryByText('律师演示')).not.toBeInTheDocument();
   });
 
+  it('submits password login and never persists the raw password', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: '密码登录' }));
+    await user.type(screen.getByLabelText('手机号'), '13800001234');
+    await user.type(screen.getByLabelText('密码'), 'ClientPass123!');
+    await user.click(screen.getByRole('button', { name: '登录' }));
+
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
+    const fetchMock = vi.mocked(fetch);
+    const passwordLoginCall = fetchMock.mock.calls.find(([input]) => (input instanceof Request ? input.url : input.toString()).endsWith('/api/v1/auth/login/password'));
+    expect(passwordLoginCall).toBeTruthy();
+    expect(passwordLoginPayload).toEqual({
+      phone: '13800001234',
+      password: 'ClientPass123!'
+    });
+    expect(window.localStorage.getItem('law-ai-auth')).not.toContain('ClientPass123!');
+  });
+
   it('keeps client registration consent unchecked and required', async () => {
     const user = userEvent.setup();
     await router.navigate({ to: '/register/client' });
@@ -611,6 +640,9 @@ describe('App', () => {
     await user.type(screen.getByLabelText('姓名'), '王先生');
     await user.type(screen.getByLabelText('手机号'), '13800001234');
     await user.type(screen.getByLabelText('验证码'), '654321');
+
+    await user.type(screen.getByLabelText('设置密码'), 'ClientPass123!');
+    await user.type(screen.getByLabelText('确认密码'), 'ClientPass123!');
 
     const terms = screen.getByLabelText(/服务协议/);
     const privacy = screen.getByLabelText(/隐私政策/);
@@ -623,6 +655,52 @@ describe('App', () => {
     expect(submit).toBeDisabled();
     await user.click(privacy);
     expect(submit).toBeEnabled();
+  });
+
+  it('blocks client registration when password confirmation does not match', async () => {
+    const user = userEvent.setup();
+    await router.navigate({ to: '/register/client' });
+
+    render(<App />);
+
+    await user.type(await screen.findByLabelText('姓名'), '王先生');
+    await user.type(screen.getByLabelText('手机号'), '13800001234');
+    await user.type(screen.getByLabelText('验证码'), '654321');
+    await user.type(screen.getByLabelText('设置密码'), 'ClientPass123!');
+    await user.type(screen.getByLabelText('确认密码'), 'OtherPass123!');
+    await user.click(screen.getByLabelText(/服务协议/));
+    await user.click(screen.getByLabelText(/隐私政策/));
+    await user.click(screen.getByRole('button', { name: '完成注册' }));
+
+    expect(await screen.findByText('两次输入的密码不一致')).toBeInTheDocument();
+    const fetchMock = vi.mocked(fetch);
+    expect(fetchMock.mock.calls.some(([input]) => (input instanceof Request ? input.url : input.toString()).endsWith('/api/v1/auth/register/client'))).toBe(false);
+  });
+
+  it('submits client registration password without confirmation', async () => {
+    const user = userEvent.setup();
+    await router.navigate({ to: '/register/client' });
+
+    render(<App />);
+
+    await user.type(await screen.findByLabelText('姓名'), '王先生');
+    await user.type(screen.getByLabelText('手机号'), '13800001234');
+    await user.type(screen.getByLabelText('验证码'), '654321');
+    await user.type(screen.getByLabelText('设置密码'), 'ClientPass123!');
+    await user.type(screen.getByLabelText('确认密码'), 'ClientPass123!');
+    await user.click(screen.getByLabelText(/服务协议/));
+    await user.click(screen.getByLabelText(/隐私政策/));
+    await user.click(screen.getByRole('button', { name: '完成注册' }));
+
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
+    const fetchMock = vi.mocked(fetch);
+    const registerCall = fetchMock.mock.calls.find(([input]) => (input instanceof Request ? input.url : input.toString()).endsWith('/api/v1/auth/register/client'));
+    expect(registerCall).toBeTruthy();
+    expect(clientRegisterPayload).toMatchObject({
+      phone: '13800001234',
+      password: 'ClientPass123!'
+    });
+    expect(clientRegisterPayload).not.toHaveProperty('confirmPassword');
   });
 
   it('renders registration pages with branded hero and touch-friendly legal links', async () => {
@@ -682,6 +760,8 @@ describe('App', () => {
     await user.type(screen.getByLabelText('执业证号'), '11101202010123456');
     await user.type(screen.getByLabelText('执业地区'), '上海');
     await user.type(screen.getByLabelText('擅长领域'), '合同纠纷,债务催收');
+    await user.type(screen.getByLabelText('设置密码'), 'LawyerPass123!');
+    await user.type(screen.getByLabelText('确认密码'), 'LawyerPass123!');
     await user.click(screen.getByLabelText(/服务协议/));
     await user.click(screen.getByLabelText(/隐私政策/));
     await user.click(screen.getByRole('button', { name: '提交入驻申请' }));
