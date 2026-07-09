@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -716,6 +716,15 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/v1/cases/case-test/documents')) {
         return Promise.resolve(jsonResponse({ documents: [] }));
+      }
+      if (url.endsWith('/api/v1/cases/case-contract-review/work-items')) {
+        return Promise.resolve(jsonResponse({ workItems: contractReviewSelfServiceWorkItems }));
+      }
+      if (url.endsWith('/api/v1/cases/case-contract-review/documents')) {
+        return Promise.resolve(jsonResponse({ documents: [contractReviewSelfServiceDocument] }));
+      }
+      if (url.endsWith('/api/v1/cases/case-contract-review')) {
+        return Promise.resolve(jsonResponse({ case: contractReviewSelfServiceCase }));
       }
       if (url.endsWith('/api/v1/lawyer/cases/case-test/documents')) {
         return Promise.resolve(jsonResponse({ documents: [lawyerDocument] }));
@@ -1858,6 +1867,80 @@ describe('App', () => {
         channel: '自行发送',
         note: '用户确认已自行发送或使用 AI 自助材料'
       });
+    });
+  });
+
+  it('copies the self-service template and records copy success only after clipboard succeeds', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true
+    });
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordSelfServiceAction: (caseId: string, input: unknown) => Promise<typeof contractReviewSelfServiceCase> }, 'recordSelfServiceAction')
+      .mockResolvedValue(contractReviewSelfServiceCase);
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-contract-review'), contractReviewSelfServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-contract-review'), contractReviewSelfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-contract-review'), [contractReviewSelfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-contract-review' } });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '复制模板内容' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('合同审查意见'));
+      expect(recordSpy).toHaveBeenCalledWith('case-contract-review', {
+        action: 'copy_template',
+        note: '用户已复制 AI 自助模板'
+      });
+    });
+    expect(await screen.findByText('模板内容已复制，请按当前业务场景自行核对后使用。')).toBeInTheDocument();
+  });
+
+  it('opens a manual copy sheet without recording copy success when browser copy is blocked', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('clipboard blocked'));
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true
+    });
+    Object.defineProperty(document, 'execCommand', {
+      value: undefined,
+      configurable: true
+    });
+    const recordSpy = vi
+      .spyOn(apiModule as unknown as { recordSelfServiceAction: (caseId: string, input: unknown) => Promise<typeof contractReviewSelfServiceCase> }, 'recordSelfServiceAction')
+      .mockResolvedValue(contractReviewSelfServiceCase);
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.detail('case-contract-review'), contractReviewSelfServiceCase);
+    queryClient.setQueryData(caseKeys.workItems('case-contract-review'), contractReviewSelfServiceWorkItems);
+    queryClient.setQueryData(caseKeys.documents('case-contract-review'), [contractReviewSelfServiceDocument]);
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-contract-review' } });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '复制模板内容' }));
+
+    const dialog = await screen.findByRole('dialog', { name: '合同审查意见（AI 自助模板）' });
+    expect(within(dialog).getByText('手动复制模板')).toBeInTheDocument();
+    expect(within(dialog).getByText('合同审查意见（AI 自助模板）')).toBeInTheDocument();
+    const textArea = within(dialog).getByRole('textbox', { name: '合同审查意见（AI 自助模板）全文' });
+    expect((textArea as HTMLTextAreaElement).value).toContain('风险条款');
+    expect(within(dialog).getByRole('button', { name: '下载 TXT' })).toBeEnabled();
+    expect(recordSpy).not.toHaveBeenCalledWith('case-contract-review', {
+      action: 'copy_template',
+      note: '用户已复制 AI 自助模板'
     });
   });
 

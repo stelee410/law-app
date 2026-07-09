@@ -1,6 +1,6 @@
 import { Link, useParams } from '@tanstack/react-router';
-import { ArrowLeft, BookOpenText, Check, CheckCircle2, ChevronRight, ClipboardCopy, CloudUpload, Contact, Download, FileCheck2, FileSearch, FileText, Headphones, Landmark, MessageCircle, Radio, Scale, Send, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowLeft, BookOpenText, Check, CheckCircle2, ChevronRight, ClipboardCopy, CloudUpload, Contact, Download, FileCheck2, FileSearch, FileText, Headphones, Landmark, MessageCircle, Radio, Scale, Send, ShieldCheck, X } from 'lucide-react';
+import { useRef, useState } from 'react';
 import { MetricCard } from '../components/h5/MetricCard';
 import { SectionHeader } from '../components/h5/SectionHeader';
 import { Timeline } from '../components/h5/Timeline';
@@ -23,6 +23,7 @@ export function CaseDetailPage() {
   const lawCase = caseQuery.data;
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<string>>(() => new Set());
   const [selfServiceNotice, setSelfServiceNotice] = useState('');
+  const [manualCopySheetOpen, setManualCopySheetOpen] = useState(false);
 
   if (caseQuery.isPending) return <StateBlock title="案件加载中" />;
   if (!lawCase) return <StateBlock title="案件不存在" />;
@@ -90,13 +91,16 @@ export function CaseDetailPage() {
 
   async function handleCopyTemplate() {
     if (!primarySelfServiceBody) return;
-    if (navigator.clipboard) {
-      const copied = await navigator.clipboard.writeText(primarySelfServiceBody).then(() => true).catch(() => false);
-      setSelfServiceNotice(copied ? selfServiceCopy.copiedNotice : '复制失败，请展开全文后手动复制。');
-    } else {
-      setSelfServiceNotice('当前浏览器不支持一键复制，请展开全文后手动复制。');
+    setManualCopySheetOpen(false);
+    const copied = await copyTextToClipboard(primarySelfServiceBody);
+    const legacyCopied = copied || copyTextWithLegacySelection(primarySelfServiceBody);
+    if (legacyCopied) {
+      setSelfServiceNotice(selfServiceCopy.copiedNotice);
+      recordAction({ action: 'copy_template', note: '用户已复制 AI 自助模板' });
+      return;
     }
-    recordAction({ action: 'copy_template', note: '用户已复制 AI 自助模板' });
+    setSelfServiceNotice('一键复制受当前浏览器限制，请打开手动复制面板选中全文。');
+    setManualCopySheetOpen(true);
   }
 
   function handleDownloadTemplate() {
@@ -402,6 +406,106 @@ export function CaseDetailPage() {
           <ChevronRight size={18} />
         </a>
       </section>
+      {manualCopySheetOpen && primarySelfServiceDocument && (
+        <ManualCopySheet
+          title={normalizeSelfServiceDocumentTitle(primarySelfServiceDocument.title, lawCase.caseType)}
+          body={primarySelfServiceBody}
+          onDownload={handleDownloadTemplate}
+          onClose={() => setManualCopySheetOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (!navigator.clipboard?.writeText) return false;
+  return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+}
+
+function copyTextWithLegacySelection(text: string): boolean {
+  if (!document.body || typeof document.execCommand !== 'function') return false;
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.setAttribute('aria-hidden', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '0';
+  textarea.style.left = '0';
+  textarea.style.width = '1px';
+  textarea.style.height = '1px';
+  textarea.style.opacity = '0';
+  textarea.style.fontSize = '16px';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
+type ManualCopySheetProps = {
+  title: string;
+  body: string;
+  onDownload: () => void;
+  onClose: () => void;
+};
+
+function ManualCopySheet({ title, body, onDownload, onClose }: ManualCopySheetProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  function handleSelectAll() {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-slate-950/45 px-0" role="dialog" aria-modal="true" aria-labelledby="manual-copy-title">
+      <div className="w-full rounded-t-2xl bg-white px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl">
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-300" />
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-blue-700">手动复制模板</p>
+            <h2 id="manual-copy-title" className="mt-1 break-words text-lg font-black leading-6 text-slate-950">{title}</h2>
+          </div>
+          <button className="grid size-11 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600" type="button" onClick={onClose}>
+            <X size={18} />
+            <span className="sr-only">关闭</span>
+          </button>
+        </div>
+        <p className="mt-3 rounded-lg bg-blue-50 p-3 text-sm font-semibold leading-5 text-blue-700">
+          当前浏览器限制一键复制，请选中全文后使用系统复制。
+        </p>
+        <textarea
+          ref={textareaRef}
+          className="mt-3 h-72 w-full resize-none rounded-lg border border-slate-200 bg-slate-50 p-3 text-[16px] leading-6 text-slate-800 outline-none focus:border-blue-400 focus:bg-white"
+          value={body}
+          readOnly
+          aria-label={`${title}全文`}
+        />
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <button className="flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-2 text-sm font-black text-white" type="button" onClick={handleSelectAll}>
+            <ClipboardCopy size={16} />
+            选中全文
+          </button>
+          <button className="flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-100 px-2 text-sm font-black text-slate-700" type="button" onClick={onDownload}>
+            <Download size={16} />
+            下载 TXT
+          </button>
+          <button className="flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-900 px-2 text-sm font-black text-white" type="button" onClick={onClose}>
+            <X size={16} />
+            关闭
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
