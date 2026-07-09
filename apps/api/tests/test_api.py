@@ -8,6 +8,7 @@ os.environ["DEFAULT_LLM_MODEL"] = ""
 
 from fastapi.testclient import TestClient
 import jwt
+import pytest
 
 from app import store as store_module
 from app.core.config import Settings
@@ -439,8 +440,10 @@ def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
   ai_items = [item for item in work_items.json()["workItems"] if item["kind"] == "ai_guidance"]
   assert len(ai_items) == 1
   assert ai_items[0]["status"] == "in_progress"
-  assert "草稿" in ai_items[0]["summary"]
-  assert "下一步" in ai_items[0]["summary"]
+  assert "付款催告函（AI 自助模板）" in ai_items[0]["summary"]
+  assert "复制或下载付款催告函模板" in ai_items[0]["summary"]
+  assert "自行发送/使用" in ai_items[0]["summary"]
+  assert "按建议发送催告" not in ai_items[0]["summary"]
   assert [item for item in work_items.json()["workItems"] if item["kind"] == "lawyer_review"] == []
 
   documents = client.get(f"/api/v1/cases/{case_id}/documents", headers=client_headers)
@@ -454,7 +457,27 @@ def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
   document = self_service_documents[0]
   assert document["type"] == "lawyer_letter"
   assert document["status"] == "approved"
+  assert document["title"] == "付款催告函（AI 自助模板）"
   assert "人工智能（AI）生成" in document["body"]
+  assert "付款催告函（AI 自助模板）" in document["body"]
+  assert "一、发函主体与相对方" in document["body"]
+  assert "二、事实摘要" in document["body"]
+  assert "三、法律依据" in document["body"]
+  assert "以下为通用合同/金钱债务条款，具体适用以事实和证据为准" in document["body"]
+  assert "《中华人民共和国民法典》第五百七十七条" in document["body"]
+  assert "《中华人民共和国民法典》第五百七十九条" in document["body"]
+  assert "《中华人民共和国民法典》第六百七十五条" not in document["body"]
+  assert "《中华人民共和国民法典》第六百七十六条" not in document["body"]
+  assert "借款合同专门条款" in document["body"]
+  assert "四、催告事项" in document["body"]
+  assert "五、送达与留痕建议" in document["body"]
+  assert "微信、短信、电子邮件或 EMS/顺丰等可查询物流的快递方式" in document["body"]
+  assert "自行催告 → 记录回应 → 准备材料或升级人工" in document["body"]
+  assert "399 自助版不代发、不代理、不出具正式律师函" in document["body"]
+  assert "律师函" in document["body"]
+  assert "律师函催告" not in document["body"]
+  assert "律师函发送需经律师复核确认" not in document["body"]
+  assert "催收函" not in document["body"]
   assert document["fields"]["generatedAt"]
 
   messages = client.get("/api/v1/messages", headers=client_headers)
@@ -498,6 +521,125 @@ def test_self_service_plan_creates_actionable_ai_guidance_once() -> None:
     if document["fields"].get("source") == "ai_self_service"
   ]
   assert len(repeated_self_service_documents) == 1
+
+
+@pytest.mark.parametrize(
+  ("case_type", "expected_title", "expected_terms", "forbidden_terms"),
+  [
+    (
+      "debt_collection",
+      "付款催告函（AI 自助模板）",
+      ("第五百七十七条", "第五百七十九条", "第五百八十三条", "借款合同专门条款需在确认存在借款法律关系后再适用"),
+      ("第六百七十五条", "第六百七十六条", "正式律师函需律师复核确认"),
+    ),
+    (
+      "lawyer_letter",
+      "函件草稿（AI生成）",
+      ("《中华人民共和国律师法》第二十八条", "普通函件草稿", "不以律师或律所名义出具正式律师函"),
+      ("付款催告函", "欠款追偿", "债务人"),
+    ),
+    (
+      "labor_dispute",
+      "劳动仲裁申请建议书（AI生成）",
+      ("劳动争议调解仲裁法》第二条", "劳动争议调解仲裁法》第二十七条", "劳动合同法》第三十条", "劳动仲裁"),
+      ("付款催告函", "欠款追偿", "债务人"),
+    ),
+    (
+      "rental_dispute",
+      "租赁纠纷协商函（AI草稿）",
+      ("民法典》第七百零三条", "民法典》第七百二十一条", "民法典》第七百二十二条", "押金返还"),
+      ("付款催告函", "欠款追偿", "债务人"),
+    ),
+    (
+      "contract_review",
+      "合同审查意见（AI生成）",
+      ("民法典》第四百六十五条", "民法典》第四百七十条", "民法典》第四百九十六条", "风险清单"),
+      ("付款催告函", "欠款追偿", "债务人", "发送律师函"),
+    ),
+  ],
+)
+def test_self_service_documents_use_case_specific_legal_knowledge(
+  case_type: str,
+  expected_title: str,
+  expected_terms: tuple[str, ...],
+  forbidden_terms: tuple[str, ...],
+) -> None:
+  client = TestClient(create_app(_test_settings()))
+  client_headers = _register_client(client, phone=f"138{len(case_type):08d}")
+  case_id = _create_case(client, client_headers, case_type=case_type)
+  _upload_required_evidence(client, client_headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+
+  selected = client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "self-service"},
+  )
+  assert selected.status_code == 200
+  selected_case = selected.json()["case"]
+  assert selected_case["selectedPlan"] == "self-service"
+  assert selected_case["status"].startswith("AI自助处理完成：")
+
+  documents = client.get(f"/api/v1/cases/{case_id}/documents", headers=client_headers)
+  assert documents.status_code == 200
+  self_service_documents = [
+    document
+    for document in documents.json()["documents"]
+    if document["fields"].get("source") == "ai_self_service"
+  ]
+  assert len(self_service_documents) == 1
+  document = self_service_documents[0]
+  assert expected_title in document["title"]
+  assert document["fields"]["caseType"] == case_type
+  assert document["fields"]["legalKnowledgeVersion"] == "cn-law-self-service-2026-07-09"
+  assert document["fields"]["legalReferences"]
+  assert all(reference["law"].startswith("《中华人民共和国") for reference in document["fields"]["legalReferences"])
+  assert all(reference["article"] and reference["sourceUrl"] for reference in document["fields"]["legalReferences"])
+  assert "人工智能（AI）生成" in document["body"]
+  assert "399 自助版不代发、不代理、不出具正式律师函" in document["body"]
+  assert "法律依据" in document["body"]
+  for term in expected_terms:
+    assert term in document["body"]
+  for term in forbidden_terms:
+    assert term not in document["body"]
+
+
+def test_self_service_llm_enhancement_falls_back_when_legal_basis_is_invalid(monkeypatch) -> None:
+  client = TestClient(create_app(_test_settings(
+    OPENAI_API_BASE="https://llm.example.test/v1",
+    OPENAI_API_KEY="test-key",
+    DEFAULT_LLM_MODEL="test-model",
+  )))
+  client_headers = _register_client(client, phone="13800004567")
+  case_id = _create_case(client, client_headers, case_type="contract_review")
+  _upload_required_evidence(client, client_headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+
+  def invalid_enhanced_body(_settings, _law_case, _template_body):
+    return "付款催告函（AI 自助模板）\n\n缺少法律依据，且错误串入欠款追偿和债务人。"
+
+  monkeypatch.setattr(store_module, "generate_self_service_document_body", invalid_enhanced_body)
+
+  selected = client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "self-service"},
+  )
+
+  assert selected.status_code == 200
+  documents = client.get(f"/api/v1/cases/{case_id}/documents", headers=client_headers)
+  document = next(
+    item
+    for item in documents.json()["documents"]
+    if item["fields"].get("source") == "ai_self_service"
+  )
+  assert "合同审查意见（AI生成）" in document["title"]
+  assert "二、法律依据与审查口径" in document["body"]
+  assert "《中华人民共和国民法典》第四百六十五条" in document["body"]
+  assert "《中华人民共和国民法典》第五百零九条" in document["body"]
+  assert "付款催告函" not in document["body"]
+  assert "欠款追偿" not in document["body"]
+  assert "债务人" not in document["body"]
 
 
 def test_self_service_actions_advance_mvp_loop() -> None:
@@ -551,6 +693,53 @@ def test_self_service_actions_advance_mvp_loop() -> None:
   assert paid_case["status"] == "已完成自助处理"
 
 
+def test_self_service_upgrade_hands_off_without_repeating_actions() -> None:
+  client = TestClient(create_app(_test_settings()))
+  client_headers = _register_client(client, phone="13800001234")
+  case_id = _create_case(client, client_headers)
+  _upload_required_evidence(client, client_headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+  assert client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "self-service"},
+  ).status_code == 200
+  assert client.post(
+    f"/api/v1/cases/{case_id}/self-service/actions",
+    headers=client_headers,
+    json={"action": "mark_sent", "note": "已自行发送"},
+  ).status_code == 200
+  assert client.post(
+    f"/api/v1/cases/{case_id}/self-service/actions",
+    headers=client_headers,
+    json={"action": "record_response", "response": "no_response", "note": "对方拒绝"},
+  ).status_code == 200
+
+  upgraded = client.post(
+    f"/api/v1/cases/{case_id}/self-service/actions",
+    headers=client_headers,
+    json={"action": "upgrade_service", "note": "申请人工服务"},
+  )
+
+  assert upgraded.status_code == 200
+  upgraded_case = upgraded.json()["case"]
+  assert upgraded_case["status"] == "已申请升级人工服务"
+  letter_stage = next(stage for stage in upgraded_case["stages"] if stage["key"] == "letter")
+  negotiation_stage = next(stage for stage in upgraded_case["stages"] if stage["key"] == "negotiation")
+  filing_stage = next(stage for stage in upgraded_case["stages"] if stage["key"] == "filing")
+  recovery_stage = next(stage for stage in upgraded_case["stages"] if stage["key"] == "recovery")
+  assert letter_stage["status"] == "done"
+  assert negotiation_stage["status"] == "done"
+  assert filing_stage["status"] == "done"
+  assert recovery_stage["status"] == "todo"
+  assert all(stage["status"] != "active" for stage in upgraded_case["stages"])
+
+  work_items = client.get(f"/api/v1/cases/{case_id}/work-items", headers=client_headers)
+  assert work_items.status_code == 200
+  guidance_items = [item for item in work_items.json()["workItems"] if item["kind"] == "ai_guidance"]
+  assert guidance_items[0]["status"] == "completed"
+
+
 def test_lawyer_review_plan_keeps_standard_lawyer_letter_stage() -> None:
   client = TestClient(create_app(_test_settings()))
   client_headers = _register_client(client, phone="13800001234")
@@ -569,6 +758,29 @@ def test_lawyer_review_plan_keeps_standard_lawyer_letter_stage() -> None:
   letter_stage = next(stage for stage in selected_case["stages"] if stage["key"] == "letter")
   assert letter_stage["title"] == "发送律师函"
   assert letter_stage["description"] == "生成并发送律师函"
+
+
+def test_full_service_plan_keeps_standard_service_stages() -> None:
+  client = TestClient(create_app(_test_settings()))
+  client_headers = _register_client(client, phone="13800001234")
+  case_id = _create_case(client, client_headers)
+  _upload_required_evidence(client, client_headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+
+  selected = client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "full-service"},
+  )
+
+  assert selected.status_code == 200
+  selected_case = selected.json()["case"]
+  letter_stage = next(stage for stage in selected_case["stages"] if stage["key"] == "letter")
+  negotiation_stage = next(stage for stage in selected_case["stages"] if stage["key"] == "negotiation")
+  assert letter_stage["title"] == "发送律师函"
+  assert letter_stage["description"] == "生成并发送律师函"
+  assert negotiation_stage["title"] == "协商调解"
+  assert "自行" not in letter_stage["description"]
 
 
 def test_self_service_action_requires_self_service_plan() -> None:
@@ -997,24 +1209,72 @@ def _create_approved_lawyer(client: TestClient, phone: str = "13900008888") -> d
   return lawyer_headers
 
 
-def _create_case(client: TestClient, headers: dict[str, str]) -> str:
+def _create_case(client: TestClient, headers: dict[str, str], case_type: str = "debt_collection") -> str:
+  case_payloads = {
+    "debt_collection": {
+      "debtorName": "北京YY贸易有限公司",
+      "amount": 52300,
+      "dispute": "对方确认收货后长期拖欠尾款，已有多次书面催收记录。",
+      "partyRole": "债权人",
+      "claimType": "货款追偿",
+      "claimSummary": "对方拖欠合同尾款，需要自行催告并保留送达记录。",
+    },
+    "lawyer_letter": {
+      "debtorName": "海南有钱公司",
+      "amount": 80000,
+      "dispute": "相对方未按约履行合作义务，需要发送普通函件草稿进行事实核对和履行提醒。",
+      "partyRole": "权利主张方",
+      "claimType": "履行催告",
+      "claimSummary": "需要函件草稿提醒对方核对事实、限期回复并保留沟通记录。",
+    },
+    "labor_dispute": {
+      "debtorName": "上海用工科技有限公司",
+      "amount": 36000,
+      "dispute": "用人单位拖欠工资并要求离职，需要整理劳动关系证据和仲裁准备材料。",
+      "partyRole": "劳动者",
+      "claimType": "拖欠工资",
+      "claimSummary": "需要核对工资流水、考勤和沟通记录，准备劳动仲裁材料。",
+    },
+    "rental_dispute": {
+      "debtorName": "杭州房东服务有限公司",
+      "amount": 12000,
+      "dispute": "退租后相对方拒绝返还押金并主张房屋损坏，需要整理租赁合同和交接证据协商处理。",
+      "partyRole": "承租人",
+      "claimType": "押金返还",
+      "claimSummary": "需要协商押金返还和房屋状态争议，并保留交接、照片和沟通记录。",
+    },
+    "contract_review": {
+      "debtorName": "深圳合作伙伴有限公司",
+      "amount": 200000,
+      "dispute": "拟签署服务合同，需要识别付款、验收、违约、解除和争议解决条款风险。",
+      "partyRole": "合同审查申请人",
+      "claimType": "服务合同审查",
+      "claimSummary": "需要输出合同风险清单、修改建议和需人工复核的重点条款。",
+    },
+  }
+  case_payload = case_payloads[case_type]
   created = client.post(
     "/api/v1/cases",
     headers=headers,
     json={
-      "debtorName": "北京YY贸易有限公司",
+      "caseType": case_type,
+      "debtorName": case_payload["debtorName"],
       "contactName": "李女士",
       "contactPhone": "13900001111",
-      "amount": 52300,
+      "amount": case_payload["amount"],
       "contractDate": "2024-05-02",
-      "dispute": "对方确认收货后长期拖欠尾款，已有多次书面催收记录。",
+      "dispute": case_payload["dispute"],
       "dueStatus": "已到期",
+      "partyRole": case_payload["partyRole"],
+      "counterpartyName": case_payload["debtorName"],
+      "claimType": case_payload["claimType"],
+      "claimSummary": case_payload["claimSummary"],
     },
   )
   assert created.status_code == 201
   law_case = created.json()["case"]
   case_id = law_case["id"]
-  assert law_case["status"] == "待补充证据"
+  assert law_case["status"].startswith("待补充")
   return case_id
 
 

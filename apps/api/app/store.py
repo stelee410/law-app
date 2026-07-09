@@ -19,6 +19,7 @@ from app.cases.self_service import (
   apply_self_service_outcome,
   build_self_service_payload,
   ensure_ai_notice,
+  validate_self_service_body,
 )
 from app.auth.security import create_access_token, decode_access_token, hash_password, verify_password
 from app.core.config import Settings
@@ -67,7 +68,15 @@ def _build_enhanced_self_service_payload(settings: Settings, law_case: LawCase) 
     )
     enhanced = None
   if enhanced is not None:
-    payload.body = ensure_ai_notice(enhanced)
+    enhanced_body = ensure_ai_notice(enhanced)
+    if validate_self_service_body(law_case.caseType, enhanced_body):
+      payload.body = enhanced_body
+    else:
+      logger.info(
+        "self_service.llm validation_failed case_id=%s case_type=%s",
+        law_case.id,
+        law_case.caseType,
+      )
   return payload
 
 
@@ -2580,6 +2589,9 @@ def _apply_self_service_action(law_case: LawCase, input_data: SelfServiceActionI
     return "自助案件已结案", input_data.note or "用户已确认自助处理完成。", payload
   if input_data.action == "upgrade_service":
     law_case.status = "已申请升级人工服务"
+    _complete_self_service_document_stage(law_case, completed_at)
+    _set_stage(law_case, "negotiation", "done", "已记录对方拒绝、无回应或需人工复核", completed_at)
+    _set_stage(law_case, "filing", "done", "已申请升级人工服务，399 自助处理已交接", completed_at)
     return "已申请升级人工服务", input_data.note or "用户已申请升级人工复核或代办服务。", payload
   return "自助动作已记录", input_data.note or "用户已记录自助处理动作。", payload
 
