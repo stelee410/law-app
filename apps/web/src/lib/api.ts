@@ -18,7 +18,6 @@ import type {
   LawCase,
   NotificationMessage,
   OtpResponse,
-  PasswordLoginInput,
   PlanId,
   ReviewOpinion,
   SelfServiceActionInput,
@@ -73,17 +72,14 @@ export async function getHealth(): Promise<HealthResponse> {
   return api.get(apiUrl('/health')).json<HealthResponse>();
 }
 
-export async function requestLoginCode(phone: string): Promise<OtpResponse> {
-  return api.post(apiUrl('/auth/request-code'), { json: { phone } }).json<OtpResponse>();
+export async function requestLoginCode(phone: string, purpose: 'login' | 'register'): Promise<OtpResponse> {
+  return api.post(apiUrl('/auth/request-code'), { json: { phone, purpose } }).json<OtpResponse>();
 }
 
 export async function loginWithCode(phone: string, code: string): Promise<AuthToken> {
   return api.post(apiUrl('/auth/login'), { json: { phone, code } }).json<AuthToken>();
 }
 
-export async function loginWithPassword(input: PasswordLoginInput): Promise<AuthToken> {
-  return api.post(apiUrl('/auth/login/password'), { json: input }).json<AuthToken>();
-}
 
 export async function registerClient(input: ClientRegisterInput): Promise<AuthToken> {
   return api.post(apiUrl('/auth/register/client'), { json: input }).json<AuthToken>();

@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, Up
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app.auth import service as auth_service
+from app.auth.service import SmsCooldownError
+from app.auth.sms import SmsNotConfiguredError, SmsProviderError, SmsTemplateMissingError
 from app.cases import service as cases_service
 from app.core.config import Settings
 from app.evidence import service as evidence_service
@@ -96,8 +98,18 @@ def health(settings: Annotated[Settings, Depends(_get_settings)]) -> dict[str, s
 def request_code(
   payload: RequestCodeInput,
   store: Annotated[AppStore, Depends(_get_store)],
+  settings: Annotated[Settings, Depends(_get_settings)],
 ) -> dict[str, str]:
-  return auth_service.request_login_code(store, payload.phone).model_dump()
+  try:
+    return auth_service.request_login_code(store, settings, payload.phone, payload.purpose).model_dump(exclude_none=True)
+  except SmsCooldownError as exc:
+    raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="SMS_TOO_FREQUENT") from exc
+  except SmsTemplateMissingError as exc:
+    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="SMS_TEMPLATE_MISSING") from exc
+  except SmsNotConfiguredError as exc:
+    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="SMS_NOT_CONFIGURED") from exc
+  except SmsProviderError as exc:
+    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="SMS_PROVIDER_ERROR") from exc
 
 
 @router.post("/auth/login")

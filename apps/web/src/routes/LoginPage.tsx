@@ -1,32 +1,42 @@
-import { Link, useNavigate } from '@tanstack/react-router';
-import { KeyRound, ShieldCheck, Smartphone, UserPlus } from 'lucide-react';
+import { useNavigate } from '@tanstack/react-router';
+import { ShieldCheck, Smartphone } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import brandLogo from '../assets/brand-logo.png';
 import loginHero from '../assets/login-hero.png';
 import { useLoginMutation, useRequestCodeMutation } from '../hooks/useCaseQueries';
+import { useSmsCountdown } from '../hooks/useSmsCountdown';
 
 export function LoginPage() {
   const navigate = useNavigate();
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
-  const [password, setPassword] = useState('');
-  const [loginMode, setLoginMode] = useState<'code' | 'password'>('code');
+  const [loginErrorDetail, setLoginErrorDetail] = useState<string | null>(null);
   const requestCode = useRequestCodeMutation();
   const login = useLoginMutation();
+  const { remainingSeconds, startCountdown } = useSmsCountdown();
   const enableDemoLogin = import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true';
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const session = await login.mutateAsync(loginMode === 'password' ? { mode: 'password', phone, password } : { mode: 'code', phone, code });
-    if (session.user.role === 'admin') {
-      await navigate({ to: '/admin' });
-      return;
+    setLoginErrorDetail(null);
+    try {
+      const session = await login.mutateAsync({ phone, code });
+      if (session.user.role === 'admin') {
+        await navigate({ to: '/admin' });
+        return;
+      }
+      if (session.user.role === 'lawyer') {
+        await navigate({ to: session.user.lawyerReviewStatus === 'approved' ? '/lawyer' : '/lawyer/review-status' });
+        return;
+      }
+      await navigate({ to: '/' });
+    } catch (error) {
+      setLoginErrorDetail(await readApiErrorDetail(error));
     }
-    if (session.user.role === 'lawyer') {
-      await navigate({ to: session.user.lawyerReviewStatus === 'approved' ? '/lawyer' : '/lawyer/review-status' });
-      return;
-    }
-    await navigate({ to: '/' });
+  }
+
+  function handleRequestCode() {
+    requestCode.mutate({ phone, purpose: 'login' }, { onSuccess: startCountdown });
   }
 
   return (
@@ -42,16 +52,7 @@ export function LoginPage() {
             隐私保护
           </span>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Link className="flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-3 text-sm font-bold text-blue-700 shadow-sm" to="/register/client">
-            <UserPlus size={16} />
-            客户注册
-          </Link>
-          <Link className="flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-3 text-sm font-bold text-slate-700 shadow-sm" to="/register/lawyer">
-            <ShieldCheck size={16} />
-            律师入驻
-          </Link>
-        </div>
+
         {enableDemoLogin && (
           <div className="grid grid-cols-2 gap-2">
             <button className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-bold text-blue-700" type="button" onClick={() => { setPhone('13800001234'); setCode(requestCode.data?.mockCode ?? '123456'); }}>
@@ -64,89 +65,41 @@ export function LoginPage() {
         )}
       </section>
 
-      <img
-        className="h-32 w-full rounded-lg object-cover object-center shadow-sm shadow-blue-100"
-        src={loginHero}
-        alt="法律服务安全协作插图"
-        loading="eager"
-      />
+      <img className="h-32 w-full rounded-lg object-cover object-center shadow-sm shadow-blue-100" src={loginHero} alt="法律服务安全协作插图" loading="eager" />
 
       <form className="space-y-4 rounded-lg border border-white bg-white p-4 shadow-xl shadow-slate-200/70" onSubmit={handleSubmit}>
-        <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
-          <button
-            className={`h-10 rounded-md text-sm font-black ${loginMode === 'code' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'}`}
-            type="button"
-            onClick={() => setLoginMode('code')}
-          >
-            验证码登录
-          </button>
-          <button
-            className={`h-10 rounded-md text-sm font-black ${loginMode === 'password' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'}`}
-            type="button"
-            onClick={() => setLoginMode('password')}
-          >
-            密码登录
-          </button>
-        </div>
+
         <label className="block">
           <span className="mb-2 block text-sm font-semibold text-slate-700">手机号</span>
-          <input
-            className="h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 text-base outline-none focus:border-blue-500 focus:bg-white"
-            inputMode="tel"
-            value={phone}
-            onChange={(event) => setPhone(event.target.value)}
-            placeholder="13800001234"
-          />
+          <input aria-label="手机号" className="h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 text-base outline-none focus:border-blue-500 focus:bg-white" inputMode="tel" autoComplete="tel" maxLength={11} value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, ''))} placeholder="请输入 11 位手机号" />
         </label>
-        {loginMode === 'code' ? (
-          <label className="block">
-          <span className="mb-2 block text-sm font-semibold text-slate-700">验证码</span>
+        <label className="block">
+          <span className="mb-2 block text-sm font-semibold text-slate-700">短信验证码</span>
           <div className="flex gap-2">
-            <input
-              className="h-12 min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-4 text-base outline-none focus:border-blue-500 focus:bg-white"
-              inputMode="numeric"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder="123456"
-            />
-            <button
-              className="h-12 rounded-lg bg-slate-900 px-4 text-sm font-bold text-white disabled:opacity-50"
-              type="button"
-              disabled={phone.length < 6 || requestCode.isPending}
-              onClick={() => requestCode.mutate(phone)}
-            >
-              获取
+            <input aria-label="短信验证码" className="h-12 min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-4 text-base outline-none focus:border-blue-500 focus:bg-white" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="请输入验证码" />
+            <button className="h-12 min-w-28 rounded-lg bg-slate-900 px-4 text-sm font-bold text-white disabled:opacity-50" type="button" disabled={phone.length !== 11 || requestCode.isPending || remainingSeconds > 0} onClick={handleRequestCode}>
+              {requestCode.isPending ? '发送中' : remainingSeconds > 0 ? `${remainingSeconds}s` : '获取验证码'}
             </button>
           </div>
-          </label>
-        ) : (
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-700">密码</span>
-            <input
-              className="h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 text-base outline-none focus:border-blue-500 focus:bg-white"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="至少 8 位"
-            />
-          </label>
-        )}
-        {loginMode === 'code' && requestCode.data?.mockCode && (
-          <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
-            测试验证码：{requestCode.data.mockCode}
-          </div>
-        )}
-        {login.isError && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">登录失败，请检查账号信息。</div>}
-        <button
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 text-base font-black text-white shadow-lg shadow-blue-200 disabled:opacity-50"
-          type="submit"
-          disabled={phone.length < 6 || (loginMode === 'password' ? password.length < 8 : code.length < 4) || login.isPending}
-        >
-          {loginMode === 'password' ? <KeyRound size={18} /> : <Smartphone size={18} />}
+        </label>
+        {requestCode.data?.mockCode && <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">测试验证码：{requestCode.data.mockCode}</div>}
+        {requestCode.isSuccess && !requestCode.data.mockCode && <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">验证码已发送，请查看短信。</div>}
+        {requestCode.isError && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">验证码发送失败，请稍后重试。</div>}
+
+        {login.isError && loginErrorDetail === 'INVALID_CODE' && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">验证码错误或已过期，请重新获取。</div>}
+        {login.isError && loginErrorDetail !== 'INVALID_CODE' && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">登录失败，请稍后重试。</div>}
+        <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 text-base font-black text-white shadow-lg shadow-blue-200 disabled:opacity-50" type="submit" disabled={phone.length !== 11 || code.length < 4 || login.isPending}>
+          <Smartphone size={18} />
           登录
         </button>
       </form>
     </div>
   );
+}
+async function readApiErrorDetail(error: unknown): Promise<string | null> {
+  if (typeof error !== 'object' || error === null || !('response' in error)) return null;
+  const response = (error as { response?: Response }).response;
+  if (!response) return null;
+  const body = await response.clone().json().catch(() => undefined) as { detail?: unknown } | undefined;
+  return typeof body?.detail === 'string' ? body.detail : null;
 }

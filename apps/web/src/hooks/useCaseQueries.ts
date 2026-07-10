@@ -19,7 +19,6 @@ import {
   getMe,
   getMessages,
   loginWithCode,
-  loginWithPassword,
   markMessageRead,
   onboardLawyer,
   recordFullServiceAction,
@@ -47,7 +46,6 @@ import type {
   LawyerFullServiceActionInput,
   LawyerServiceActionInput,
   LawyerOnboardingInput,
-  PasswordLoginInput,
   PlanId,
   SelfServiceActionInput,
   SubmitReviewInput,
@@ -201,7 +199,7 @@ export function useAdminLawyersQuery() {
 
 export function useRequestCodeMutation() {
   return useMutation({
-    mutationFn: (phone: string) => requestLoginCode(phone)
+    mutationFn: (input: { phone: string; purpose: 'login' | 'register' }) => requestLoginCode(input.phone, input.purpose)
   });
 }
 
@@ -209,13 +207,7 @@ export function useLoginMutation() {
   const queryClient = useQueryClient();
   const setSession = useAuthStore((state) => state.setSession);
   return useMutation({
-    mutationFn: (input: ({ mode: 'code'; code: string } | { mode: 'password'; password: string }) & { phone: string }) => {
-      if (input.mode === 'password') {
-        const passwordInput: PasswordLoginInput = { phone: input.phone, password: input.password };
-        return loginWithPassword(passwordInput);
-      }
-      return loginWithCode(input.phone, input.code);
-    },
+    mutationFn: (input: { phone: string; code: string }) => loginWithCode(input.phone, input.code),
     onSuccess: async (session) => {
       setSession(session);
       queryClient.setQueryData(caseKeys.me, session.user);

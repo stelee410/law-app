@@ -203,16 +203,11 @@ export type OtpResponse = {
   expiresAt: string;
 };
 
-export type PasswordLoginInput = {
-  phone: string;
-  password: string;
-};
 
 export type ClientRegisterInput = {
   phone: string;
   code: string;
   name: string;
-  password?: string;
   acceptedTerms: boolean;
   acceptedPrivacy: boolean;
 };

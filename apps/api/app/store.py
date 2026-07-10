@@ -106,7 +106,8 @@ class UserNotFoundError(Exception):
 class AppStore(Protocol):
   settings: Settings
 
-  def request_login_code(self, phone: str) -> dict[str, str]: ...
+  def get_login_code_requested_at(self, phone: str, purpose: str = "login") -> datetime | None: ...
+  def request_login_code(self, phone: str, code: str | None = None, purpose: str = "login") -> dict[str, str]: ...
   def login_with_code(self, phone: str, code: str) -> AuthToken | None: ...
   def login_with_password(self, phone: str, password: str) -> AuthToken | None: ...
   def register_client(self, input_data: ClientRegisterInput) -> AuthToken | None: ...
@@ -181,7 +182,9 @@ class AppStore(Protocol):
 class InMemoryStore:
   def __init__(self, settings: Settings):
     self.settings = settings
-    self._otps: dict[str, tuple[str, datetime]] = {}
+    self._otps: dict[str, tuple[str, datetime, str]] = {}
+    self._otp_requested_at: dict[tuple[str, str], datetime] = {}
+    self._otp_attempts: dict[tuple[str, str], int] = {}
     self._users_by_phone: dict[str, User] = {}
     self._users_by_id: dict[str, User] = {}
     self._password_hashes_by_user_id: dict[str, str] = {}
@@ -194,31 +197,43 @@ class InMemoryStore:
     self._messages: dict[str, NotificationMessage] = {}
     self._evidence_storage_paths: dict[str, str] = {}
 
-  def request_login_code(self, phone: str) -> dict[str, str]:
+  def get_login_code_requested_at(self, phone: str, purpose: str = "login") -> datetime | None:
+    return self._otp_requested_at.get((_normalize_phone(phone), purpose))
+
+  def request_login_code(self, phone: str, code: str | None = None, purpose: str = "login") -> dict[str, str]:
     normalized_phone = _normalize_phone(phone)
     expires_at = _now() + timedelta(minutes=self.settings.OTP_EXPIRE_MINUTES)
-    self._otps[normalized_phone] = (self.settings.MOCK_OTP_CODE, expires_at)
+    resolved_code = code or self.settings.MOCK_OTP_CODE
+    self._otps[normalized_phone] = (resolved_code, expires_at, purpose)
+    self._otp_requested_at[(normalized_phone, purpose)] = _now()
+    self._otp_attempts[(normalized_phone, purpose)] = 0
     return {
       "phone": normalized_phone,
-      "code": self.settings.MOCK_OTP_CODE,
+      "code": resolved_code,
       "expiresAt": _iso(expires_at),
     }
 
   def login_with_code(self, phone: str, code: str) -> AuthToken | None:
     normalized_phone = _normalize_phone(phone)
     otp = self._otps.get(normalized_phone)
-    if otp is None:
+    attempt_key = (normalized_phone, "login")
+    if otp is None or self._otp_attempts.get(attempt_key, 0) >= self.settings.SMS_MAX_ATTEMPTS:
       return None
-    expected_code, expires_at = otp
-    if expected_code != code or expires_at < _now():
+    expected_code, expires_at, purpose = otp
+    if expected_code != code or purpose != "login" or expires_at < _now():
+      self._otp_attempts[attempt_key] = self._otp_attempts.get(attempt_key, 0) + 1
       return None
 
     user = self._users_by_phone.get(normalized_phone)
     if user is None:
-      raise UserNotFoundError("USER_NOT_FOUND")
+      user = _new_user(normalized_phone)
+      self._users_by_phone[normalized_phone] = user
+      self._users_by_id[user.id] = user
     if user.accountStatus == "disabled":
       raise AccountDisabledError("ACCOUNT_DISABLED")
-    return self._create_session(user)
+    session = self._create_session(user)
+    self._consume_otp(normalized_phone, "login")
+    return session
 
   def login_with_password(self, phone: str, password: str) -> AuthToken | None:
     normalized_phone = _normalize_phone(phone)
@@ -261,7 +276,9 @@ class InMemoryStore:
     self._users_by_id[user.id] = user
     if input_data.password is not None:
       self._password_hashes_by_user_id[user.id] = hash_password(input_data.password)
-    return self._create_session(user)
+    session = self._create_session(user)
+    self._consume_otp(normalized_phone, "register")
+    return session
 
   def onboard_lawyer(self, input_data: LawyerOnboardingInput) -> AuthToken | None:
     normalized_phone = _normalize_phone(input_data.phone)
@@ -302,7 +319,9 @@ class InMemoryStore:
     self._users_by_id[user.id] = user
     if input_data.password is not None:
       self._password_hashes_by_user_id[user.id] = hash_password(input_data.password)
-    return self._create_session(user)
+    session = self._create_session(user)
+    self._consume_otp(normalized_phone, "register")
+    return session
 
   def get_user_by_token(self, token: str) -> User | None:
     try:
@@ -944,12 +963,22 @@ class InMemoryStore:
     self._users_by_id[user.id] = user
     return user
 
-  def _verify_otp(self, phone: str, code: str) -> bool:
+  def _verify_otp(self, phone: str, code: str, purpose: str = "register") -> bool:
     otp = self._otps.get(phone)
-    if otp is None:
+    attempt_key = (phone, purpose)
+    if otp is None or self._otp_attempts.get(attempt_key, 0) >= self.settings.SMS_MAX_ATTEMPTS:
       return False
-    expected_code, expires_at = otp
-    return expected_code == code and expires_at >= _now()
+    expected_code, expires_at, stored_purpose = otp
+    if expected_code == code and stored_purpose == purpose and expires_at >= _now():
+      return True
+    self._otp_attempts[attempt_key] = self._otp_attempts.get(attempt_key, 0) + 1
+    return False
+
+  def _consume_otp(self, phone: str, purpose: str) -> None:
+    otp = self._otps.get(phone)
+    if otp is not None and otp[2] == purpose:
+      self._otps.pop(phone, None)
+    self._otp_attempts.pop((phone, purpose), None)
 
   def _create_session(self, user: User) -> AuthToken:
     token, session_expires_at = create_access_token(self.settings, subject=user.id)
@@ -1133,43 +1162,67 @@ class PostgresStore:
     self.settings = settings
     self.database = database
 
-  def request_login_code(self, phone: str) -> dict[str, str]:
+  def get_login_code_requested_at(self, phone: str, purpose: str = "login") -> datetime | None:
+    normalized_phone = _normalize_phone(phone)
+    with self.database.connection() as conn:
+      with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(
+          "SELECT created_at FROM otp_codes WHERE phone = %s AND purpose = %s",
+          (normalized_phone, purpose),
+        )
+        otp = cursor.fetchone()
+    return _parse_iso(otp["created_at"]) if otp is not None else None
+
+  def request_login_code(self, phone: str, code: str | None = None, purpose: str = "login") -> dict[str, str]:
     normalized_phone = _normalize_phone(phone)
     now = _now()
     expires_at = now + timedelta(minutes=self.settings.OTP_EXPIRE_MINUTES)
+    resolved_code = code or self.settings.MOCK_OTP_CODE
     with self.database.connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
           """
-          INSERT INTO otp_codes (phone, code, expires_at, created_at)
-          VALUES (%s, %s, %s, %s)
-          ON CONFLICT (phone) DO UPDATE
-          SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at, created_at = EXCLUDED.created_at
+          INSERT INTO otp_codes (phone, code, purpose, attempts, expires_at, created_at)
+          VALUES (%s, %s, %s, 0, %s, %s)
+          ON CONFLICT (phone, purpose) DO UPDATE
+          SET code = EXCLUDED.code, attempts = 0, expires_at = EXCLUDED.expires_at, created_at = EXCLUDED.created_at
           """,
-          (normalized_phone, self.settings.MOCK_OTP_CODE, _iso(expires_at), _iso(now)),
+          (normalized_phone, resolved_code, purpose, _iso(expires_at), _iso(now)),
         )
       conn.commit()
-    return {"phone": normalized_phone, "code": self.settings.MOCK_OTP_CODE, "expiresAt": _iso(expires_at)}
+    return {"phone": normalized_phone, "code": resolved_code, "expiresAt": _iso(expires_at)}
 
   def login_with_code(self, phone: str, code: str) -> AuthToken | None:
     normalized_phone = _normalize_phone(phone)
     with self.database.connection() as conn:
       with conn.cursor(row_factory=dict_row) as cursor:
-        cursor.execute("SELECT code, expires_at FROM otp_codes WHERE phone = %s", (normalized_phone,))
+        cursor.execute(
+          "SELECT code, attempts, expires_at FROM otp_codes WHERE phone = %s AND purpose = %s",
+          (normalized_phone, "login"),
+        )
         otp = cursor.fetchone()
-        if otp is None or otp["code"] != code or _parse_iso(otp["expires_at"]) < _now():
+        if otp is None or _parse_iso(otp["expires_at"]) < _now() or otp["attempts"] >= self.settings.SMS_MAX_ATTEMPTS:
           conn.rollback()
+          return None
+        if otp["code"] != code:
+          cursor.execute(
+            "UPDATE otp_codes SET attempts = attempts + 1 WHERE phone = %s AND purpose = %s",
+            (normalized_phone, "login"),
+          )
+          conn.commit()
           return None
         cursor.execute("SELECT * FROM users WHERE phone = %s", (normalized_phone,))
         user_row = cursor.fetchone()
         if user_row is None:
-          conn.rollback()
-          raise UserNotFoundError("USER_NOT_FOUND")
-        user = _user_from_row(user_row)
+          user = _new_user(normalized_phone)
+          self._insert_user(cursor, user)
+        else:
+          user = _user_from_row(user_row)
         if user.accountStatus == "disabled":
           conn.rollback()
           raise AccountDisabledError("ACCOUNT_DISABLED")
         token, expires_at = self._insert_session(cursor, user.id)
+        cursor.execute("DELETE FROM otp_codes WHERE phone = %s AND purpose = %s", (normalized_phone, "login"))
       conn.commit()
     return AuthToken(token=token, user=user, expiresAt=_iso(expires_at))
 
@@ -1198,7 +1251,7 @@ class PostgresStore:
     with self.database.connection() as conn:
       with conn.cursor(row_factory=dict_row) as cursor:
         if not self._verify_otp(cursor, normalized_phone, input_data.code):
-          conn.rollback()
+          conn.commit()
           return None
         cursor.execute("SELECT * FROM users WHERE phone = %s", (normalized_phone,))
         existing = cursor.fetchone()
@@ -1230,6 +1283,7 @@ class PostgresStore:
           self._update_user_row(cursor, user)
           self._set_user_password(cursor, user.id, input_data.password)
         token, expires_at = self._insert_session(cursor, user.id)
+        cursor.execute("DELETE FROM otp_codes WHERE phone = %s AND purpose = %s", (normalized_phone, "register"))
       conn.commit()
     return AuthToken(token=token, user=user, expiresAt=_iso(expires_at))
 
@@ -1238,7 +1292,7 @@ class PostgresStore:
     with self.database.connection() as conn:
       with conn.cursor(row_factory=dict_row) as cursor:
         if not self._verify_otp(cursor, normalized_phone, input_data.code):
-          conn.rollback()
+          conn.commit()
           return None
         cursor.execute("SELECT * FROM users WHERE phone = %s", (normalized_phone,))
         existing = cursor.fetchone()
@@ -1280,6 +1334,7 @@ class PostgresStore:
           self._update_user_row(cursor, user)
           self._set_user_password(cursor, user.id, input_data.password)
         token, expires_at = self._insert_session(cursor, user.id)
+        cursor.execute("DELETE FROM otp_codes WHERE phone = %s AND purpose = %s", (normalized_phone, "register"))
       conn.commit()
     return AuthToken(token=token, user=user, expiresAt=_iso(expires_at))
 
@@ -2209,10 +2264,21 @@ class PostgresStore:
     self._insert_user(cursor, user)
     return user
 
-  def _verify_otp(self, cursor, phone: str, code: str) -> bool:
-    cursor.execute("SELECT code, expires_at FROM otp_codes WHERE phone = %s", (phone,))
+  def _verify_otp(self, cursor, phone: str, code: str, purpose: str = "register") -> bool:
+    cursor.execute(
+      "SELECT code, attempts, expires_at FROM otp_codes WHERE phone = %s AND purpose = %s",
+      (phone, purpose),
+    )
     otp = cursor.fetchone()
-    return otp is not None and otp["code"] == code and _parse_iso(otp["expires_at"]) >= _now()
+    if otp is None or _parse_iso(otp["expires_at"]) < _now() or otp["attempts"] >= self.settings.SMS_MAX_ATTEMPTS:
+      return False
+    if otp["code"] == code:
+      return True
+    cursor.execute(
+      "UPDATE otp_codes SET attempts = attempts + 1 WHERE phone = %s AND purpose = %s",
+      (phone, purpose),
+    )
+    return False
 
   def _insert_session(self, cursor, user_id: str) -> tuple[str, datetime]:
     token, expires_at = create_access_token(self.settings, subject=user_id)

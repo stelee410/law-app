@@ -19,6 +19,9 @@ def _test_settings(**overrides) -> Settings:
   values = {
     "MOCK_OTP_CODE": "654321",
     "STORAGE_BACKEND": "memory",
+    "SMS_SEND_COOLDOWN": "0s",
+    "SMS_ENABLED": True,
+    "SMS_PROVIDER": "mock",
     "OPENAI_API_BASE": None,
     "OPENAI_API_KEY": None,
     "DEFAULT_LLM_MODEL": None,
@@ -1118,7 +1121,7 @@ def test_assessment_failure_is_recorded_as_event(monkeypatch) -> None:
 
 def test_client_registration_requires_consent_and_returns_session() -> None:
   client = TestClient(create_app(_test_settings()))
-  code = _request_code(client, "13800001234")
+  code = _request_code(client, "13800001234", "register")
 
   missing_consent = client.post(
     "/api/v1/auth/register/client",
@@ -1150,14 +1153,24 @@ def test_client_registration_requires_consent_and_returns_session() -> None:
   assert body["user"]["lawyerReviewStatus"] == "none"
 
 
-def test_login_does_not_create_unknown_user() -> None:
+def test_first_login_creates_active_client_user() -> None:
   client = TestClient(create_app(_test_settings()))
   code = _request_code(client, "13800007777")
 
   response = client.post("/api/v1/auth/login", json={"phone": "13800007777", "code": code})
 
-  assert response.status_code == 404
-  assert response.json()["detail"] == "USER_NOT_FOUND"
+  assert response.status_code == 200
+  body = response.json()
+  assert body["token"]
+  assert body["user"]["phone"] == "13800007777"
+  assert body["user"]["name"] == "用户7777"
+  assert body["user"]["role"] == "client"
+  assert body["user"]["accountStatus"] == "active"
+  assert body["user"]["lawyerReviewStatus"] == "none"
+
+  me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {body['token']}"})
+  assert me.status_code == 200
+  assert me.json()["user"]["id"] == body["user"]["id"]
 
 
 def test_lawyer_onboarding_keeps_pending_lawyer_out_of_lawyer_apis() -> None:
@@ -1250,7 +1263,7 @@ def test_disabled_users_cannot_restore_through_public_registration_or_onboarding
     )
     assert disabled.status_code == 200
 
-  register_code = _request_code(client, "13800001234")
+  register_code = _request_code(client, "13800001234", "register")
   register_response = client.post(
     "/api/v1/auth/register/client",
     json={
@@ -1264,7 +1277,7 @@ def test_disabled_users_cannot_restore_through_public_registration_or_onboarding
   assert register_response.status_code == 403
   assert register_response.json()["detail"] == "ACCOUNT_DISABLED"
 
-  onboard_code = _request_code(client, "13800005678")
+  onboard_code = _request_code(client, "13800005678", "register")
   onboard_response = client.post(
     "/api/v1/auth/onboard-lawyer",
     json={
@@ -1328,7 +1341,7 @@ def test_admin_cannot_be_changed_to_lawyer_through_public_onboarding() -> None:
   admin_before = client.get("/api/v1/me", headers=admin_headers).json()["user"]
   assert admin_before["role"] == "admin"
 
-  code = _request_code(client, "13600000000")
+  code = _request_code(client, "13600000000", "register")
   response = client.post(
     "/api/v1/auth/onboard-lawyer",
     json={
@@ -1383,15 +1396,15 @@ def _login(client: TestClient, phone: str = "13800001234") -> dict[str, str]:
   return headers
 
 
-def _request_code(client: TestClient, phone: str) -> str:
-  code_response = client.post("/api/v1/auth/request-code", json={"phone": phone})
+def _request_code(client: TestClient, phone: str, purpose: str = "login") -> str:
+  code_response = client.post("/api/v1/auth/request-code", json={"phone": phone, "purpose": purpose})
   assert code_response.status_code == 200
   assert code_response.json()["mockCode"] == "654321"
   return code_response.json()["mockCode"]
 
 
 def _register_client(client: TestClient, phone: str = "13800001234", name: str = "王先生", password: str | None = None) -> dict[str, str]:
-  code = _request_code(client, phone)
+  code = _request_code(client, phone, "register")
   payload = {
     "phone": phone,
     "code": code,
@@ -1411,7 +1424,7 @@ def _register_client(client: TestClient, phone: str = "13800001234", name: str =
 
 
 def _onboard_lawyer(client: TestClient, phone: str = "13900008888", password: str | None = None) -> dict[str, str]:
-  code = _request_code(client, phone)
+  code = _request_code(client, phone, "register")
   payload = {
     "phone": phone,
     "code": code,

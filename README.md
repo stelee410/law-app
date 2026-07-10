@@ -108,9 +108,35 @@ cp apps/web/.env.example apps/web/.env
 
 ```bash
 STORAGE_BACKEND=memory
+SMS_ENABLED=true
+SMS_PROVIDER=mock
 MOCK_OTP_CODE=123456
 VITE_API_BASE_URL=/api/v1
 ```
+
+本地 `mock` provider 会在响应中返回测试验证码。联调真实手机短信时改用阿里云 provider；
+签名和模板必须先在阿里云短信服务控制台审核通过，AccessKey 必须通过环境变量注入，不能提交到仓库：
+
+```bash
+SMS_ENABLED=true
+SMS_PROVIDER=aliyun
+SMS_CODE_TTL=5m
+SMS_CODE_LENGTH=6
+SMS_SEND_COOLDOWN=60s
+SMS_MAX_ATTEMPTS=5
+ALIYUN_SMS_ACCESS_KEY_ID=<RAM AccessKey ID>
+ALIYUN_SMS_ACCESS_KEY_SECRET=<RAM AccessKey Secret>
+ALIYUN_SMS_REGION_ID=cn-hangzhou
+ALIYUN_SMS_ENDPOINT=https://dysmsapi.aliyuncs.com
+ALIYUN_SMS_SIGN_NAME=<审核通过的短信签名>
+ALIYUN_SMS_TEMPLATE_REGISTER=<注册验证码模板 CODE>
+ALIYUN_SMS_TEMPLATE_LOGIN=<登录验证码模板 CODE>
+ALIYUN_SMS_TEMPLATE_CODE_PARAM=code
+ALIYUN_SMS_REQUEST_TIMEOUT=5s
+```
+
+真实短信模式使用阿里云 `SendSms` RPC HTTPS 接口，验证码不会返回给前端；发送失败只记录错误码和 request id，
+不会记录 AccessKey Secret 或验证码。
 
 需要持久化演示时切到外部 Postgres：
 
@@ -329,6 +355,8 @@ curl http://localhost:4000/api/v1/health
 | `UPLOAD_DIR` | 证据文件字节保存目录 |
 | `MOCK_OTP_CODE` | 本地 mock 登录验证码 |
 | `OTP_EXPIRE_MINUTES` | 验证码有效期 |
+| `SMS_ENABLED` / `SMS_PROVIDER` / `SMS_CODE_TTL` / `SMS_CODE_LENGTH` / `SMS_SEND_COOLDOWN` / `SMS_MAX_ATTEMPTS` | 短信开关、provider、验证码有效期/长度、发送冷却和最大校验次数 |
+| `ALIYUN_SMS_*` | 阿里云短信 AccessKey、区域、endpoint、签名、登录/注册模板及超时配置 |
 | `TOKEN_EXPIRE_DAYS` / `JWT_ACCESS_TOKEN_EXPIRE_DAYS` | 登录 token 有效期，后者设置后会覆盖前者 |
 | `JWT_SECRET_KEY` / `JWT_ALGORITHM` | JWT 配置；生产环境必须替换默认 secret |
 | `ADMIN_PHONE` / `ADMIN_NAME` / `ADMIN_PASSWORD` | 可选 admin 初始化配置；设置 `ADMIN_PASSWORD` 后 admin 可使用密码登录 |
@@ -346,7 +374,7 @@ curl http://localhost:4000/api/v1/health
 | 端点 | 方法 | 说明 |
 | --- | --- | --- |
 | `/api/v1/health` | GET | 健康检查，返回存储、LLM、Langfuse 状态 |
-| `/api/v1/auth/request-code` | POST | 请求 mock OTP 验证码 |
+| `/api/v1/auth/request-code` | POST | 按 `login` / `register` 用途发送手机验证码 |
 | `/api/v1/auth/login` | POST | 使用手机号和验证码登录 |
 | `/api/v1/auth/login/password` | POST | 使用手机号和密码登录；密码仅服务端 Argon2id 哈希保存 |
 | `/api/v1/me` | GET | 获取当前用户 |
@@ -410,7 +438,7 @@ git diff --check
 | `http://localhost:5173` 打不开 | 确认 `pnpm dev:web` 或 `pnpm dev` 正在运行，且 5173 端口未被占用 |
 | API health 不通 | 确认 Python/FastAPI API 正在 `4000` 端口运行；推荐直接用 `uv run --directory apps/api --project . uvicorn app.main:app --reload --host 0.0.0.0 --port 4000`，`pnpm dev:api` 只是等价别名 |
 | 前端请求 API 失败 | 开发模式检查 Vite `/api` proxy；compose 模式检查 nginx `/api/` 反代和 `api` 服务健康状态 |
-| 登录失败 | OTP 登录检查 `MOCK_OTP_CODE`，默认验证码是 `123456`，验证码也会在请求返回中给出；密码登录检查用户是否已注册/入驻并设置密码 |
+| 验证码发送失败 | 本地检查 `SMS_PROVIDER=mock`；阿里云模式检查 `SMS_ENABLED`、RAM AccessKey、已审核签名和对应登录/注册模板 CODE |
 | compose 下 API 连不上数据库 | 服务器从 0 到 1 部署先确认 `docker compose --env-file apps/api/.env -f docker/docker-compose.infra.yml up -d` 已启动；再确认 app 与 infra 都在 `law-app-net` 网络 |
 | 本地外部 Postgres 连接失败 | 不要使用 `POSTGRES_HOST=postgres`；在 `apps/api/.env` 把 `POSTGRES_HOST` 改成 API 容器可访问的外部数据库地址 |
 | 上传失败或文件找不到 | 检查 `UPLOAD_DIR` 是否可写；compose 下检查根目录 `uploads/` volume |

@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import brandLogo from '../assets/brand-logo.png';
 import loginHero from '../assets/login-hero.png';
 import { useOnboardLawyerMutation, useRegisterClientMutation, useRequestCodeMutation } from '../hooks/useCaseQueries';
+import { useSmsCountdown } from '../hooks/useSmsCountdown';
 
 type ConsentState = {
   acceptedTerms: boolean;
@@ -15,24 +16,18 @@ export function ClientRegistrationPage() {
   const navigate = useNavigate();
   const requestCode = useRequestCodeMutation();
   const registerClient = useRegisterClientMutation();
+  const { remainingSeconds, startCountdown } = useSmsCountdown();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordError, setPasswordError] = useState('');
   const [consent, setConsent] = useState<ConsentState>({ acceptedTerms: false, acceptedPrivacy: false });
-  const canSubmit = name.trim().length > 0 && phone.length >= 6 && code.length >= 4 && password.length >= 8 && confirmPassword.length >= 8 && consent.acceptedTerms && consent.acceptedPrivacy;
+  const canSubmit = name.trim().length > 0 && phone.length === 11 && code.length >= 4 && consent.acceptedTerms && consent.acceptedPrivacy;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit) return;
-    if (password !== confirmPassword) {
-      setPasswordError('两次输入的密码不一致');
-      return;
-    }
-    setPasswordError('');
-    await registerClient.mutateAsync({ phone, code, name, password, ...consent });
+    await registerClient.mutateAsync({ phone, code, name, ...consent });
+
     await navigate({ to: '/' });
   }
 
@@ -40,12 +35,11 @@ export function ClientRegistrationPage() {
     <RegistrationShell title="客户注册" description="注册后可以发起案件、上传证据并查看案件进度。">
       <form className="space-y-4" onSubmit={handleSubmit}>
         <TextField label="姓名" value={name} onChange={setName} placeholder="王先生" />
-        <CodeFields phone={phone} code={code} setPhone={setPhone} setCode={setCode} requestCode={() => requestCode.mutate(phone)} disabled={phone.length < 6 || requestCode.isPending} />
-        <TextField label="设置密码" value={password} onChange={setPassword} placeholder="至少 8 位" type="password" autoComplete="new-password" />
-        <TextField label="确认密码" value={confirmPassword} onChange={setConfirmPassword} placeholder="再次输入密码" type="password" autoComplete="new-password" />
+        <CodeFields phone={phone} code={code} setPhone={setPhone} setCode={setCode} requestCode={() => requestCode.mutate({ phone, purpose: 'register' }, { onSuccess: startCountdown })} disabled={phone.length !== 11 || requestCode.isPending || remainingSeconds > 0} remainingSeconds={remainingSeconds} />
         <ConsentFields consent={consent} setConsent={setConsent} />
         {requestCode.data?.mockCode && <Hint>测试验证码：{requestCode.data.mockCode}</Hint>}
-        {passwordError && <ErrorText>{passwordError}</ErrorText>}
+        {requestCode.isSuccess && !requestCode.data.mockCode && <SuccessText>验证码已发送，请查看短信。</SuccessText>}
+        {requestCode.isError && <ErrorText>验证码发送失败，请稍后重试。</ErrorText>}
         {registerClient.isError && <ErrorText>注册失败，请检查验证码和必填信息。</ErrorText>}
         <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white disabled:opacity-50" type="submit" disabled={!canSubmit || registerClient.isPending}>
           <Send size={18} />
@@ -60,12 +54,10 @@ export function LawyerOnboardingPage() {
   const navigate = useNavigate();
   const requestCode = useRequestCodeMutation();
   const onboardLawyer = useOnboardLawyerMutation();
+  const { remainingSeconds, startCountdown } = useSmsCountdown();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordError, setPasswordError] = useState('');
   const [lawFirm, setLawFirm] = useState('');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [practiceRegion, setPracticeRegion] = useState('');
@@ -74,10 +66,8 @@ export function LawyerOnboardingPage() {
   const specialties = specialtiesText.split(/[,，]/).map((item) => item.trim()).filter(Boolean);
   const canSubmit =
     name.trim().length > 0 &&
-    phone.length >= 6 &&
+    phone.length === 11 &&
     code.length >= 4 &&
-    password.length >= 8 &&
-    confirmPassword.length >= 8 &&
     lawFirm.trim().length > 0 &&
     licenseNumber.trim().length > 0 &&
     practiceRegion.trim().length > 0 &&
@@ -88,16 +78,10 @@ export function LawyerOnboardingPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit) return;
-    if (password !== confirmPassword) {
-      setPasswordError('两次输入的密码不一致');
-      return;
-    }
-    setPasswordError('');
     await onboardLawyer.mutateAsync({
       phone,
       code,
       name,
-      password,
       lawFirm,
       licenseNumber,
       practiceRegion,
@@ -111,16 +95,15 @@ export function LawyerOnboardingPage() {
     <RegistrationShell title="律师入驻" description="律师入驻需提交真实执业身份，审核通过后才能接收待办和处理文书。">
       <form className="space-y-4" onSubmit={handleSubmit}>
         <TextField label="姓名" value={name} onChange={setName} placeholder="赵律师" />
-        <CodeFields phone={phone} code={code} setPhone={setPhone} setCode={setCode} requestCode={() => requestCode.mutate(phone)} disabled={phone.length < 6 || requestCode.isPending} />
-        <TextField label="设置密码" value={password} onChange={setPassword} placeholder="至少 8 位" type="password" autoComplete="new-password" />
-        <TextField label="确认密码" value={confirmPassword} onChange={setConfirmPassword} placeholder="再次输入密码" type="password" autoComplete="new-password" />
+        <CodeFields phone={phone} code={code} setPhone={setPhone} setCode={setCode} requestCode={() => requestCode.mutate({ phone, purpose: 'register' }, { onSuccess: startCountdown })} disabled={phone.length !== 11 || requestCode.isPending || remainingSeconds > 0} remainingSeconds={remainingSeconds} />
         <TextField label="律所" value={lawFirm} onChange={setLawFirm} placeholder="某某律师事务所" />
         <TextField label="执业证号" value={licenseNumber} onChange={setLicenseNumber} placeholder="11101202010123456" />
         <TextField label="执业地区" value={practiceRegion} onChange={setPracticeRegion} placeholder="上海" />
         <TextField label="擅长领域" value={specialtiesText} onChange={setSpecialtiesText} placeholder="合同纠纷,债务催收" />
         <ConsentFields consent={consent} setConsent={setConsent} />
         {requestCode.data?.mockCode && <Hint>测试验证码：{requestCode.data.mockCode}</Hint>}
-        {passwordError && <ErrorText>{passwordError}</ErrorText>}
+        {requestCode.isSuccess && !requestCode.data.mockCode && <SuccessText>验证码已发送，请查看短信。</SuccessText>}
+        {requestCode.isError && <ErrorText>验证码发送失败，请稍后重试。</ErrorText>}
         {onboardLawyer.isError && <ErrorText>入驻提交失败，请检查验证码和必填信息。</ErrorText>}
         <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 font-black text-white disabled:opacity-50" type="submit" disabled={!canSubmit || onboardLawyer.isPending}>
           <ShieldCheck size={18} />
@@ -169,7 +152,8 @@ function CodeFields({
   setPhone,
   setCode,
   requestCode,
-  disabled
+  disabled,
+  remainingSeconds
 }: {
   phone: string;
   code: string;
@@ -177,16 +161,17 @@ function CodeFields({
   setCode: (value: string) => void;
   requestCode: () => void;
   disabled: boolean;
+  remainingSeconds: number;
 }) {
   return (
     <>
-      <TextField label="手机号" value={phone} onChange={setPhone} placeholder="13800001234" inputMode="tel" />
+      <TextField label="手机号" value={phone} onChange={(value) => setPhone(value.replace(/\D/g, '').slice(0, 11))} placeholder="请输入 11 位手机号" inputMode="tel" />
       <label className="block">
         <span className="mb-2 block text-sm font-black text-slate-700">验证码</span>
         <div className="flex gap-2">
-          <input className="h-12 min-w-0 flex-1 rounded-lg bg-slate-50 px-4 outline-none focus:ring-2 focus:ring-blue-500" inputMode="numeric" value={code} onChange={(event) => setCode(event.target.value)} placeholder="654321" />
+          <input className="h-12 min-w-0 flex-1 rounded-lg bg-slate-50 px-4 outline-none focus:ring-2 focus:ring-blue-500" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="请输入验证码" />
           <button className="h-12 rounded-lg bg-slate-900 px-4 text-sm font-bold text-white disabled:opacity-50" type="button" disabled={disabled} onClick={requestCode}>
-            获取
+            {remainingSeconds > 0 ? `${remainingSeconds}s` : '获取验证码'}
           </button>
         </div>
       </label>
@@ -257,6 +242,10 @@ function ConsentFields({ consent, setConsent }: { consent: ConsentState; setCons
 
 function Hint({ children }: { children: ReactNode }) {
   return <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">{children}</div>;
+}
+
+function SuccessText({ children }: { children: ReactNode }) {
+  return <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{children}</div>;
 }
 
 function ErrorText({ children }: { children: ReactNode }) {

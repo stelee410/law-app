@@ -23,10 +23,13 @@ def initialize_schema(database: Database) -> None:
     """,
     """
     CREATE TABLE IF NOT EXISTS otp_codes (
-      phone TEXT PRIMARY KEY,
+      phone TEXT NOT NULL,
       code TEXT NOT NULL,
+      purpose TEXT NOT NULL DEFAULT 'login',
+      attempts INTEGER NOT NULL DEFAULT 0,
       expires_at TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (phone, purpose)
     )
     """,
     """
@@ -167,6 +170,10 @@ def initialize_schema(database: Database) -> None:
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS practice_region TEXT",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS specialties_json JSONB NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TEXT",
+    "ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'login'",
+    "ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE otp_codes DROP CONSTRAINT IF EXISTS otp_codes_pkey",
+    "ALTER TABLE otp_codes ADD CONSTRAINT otp_codes_pkey PRIMARY KEY (phone, purpose)",
     "UPDATE users SET account_status = 'active' WHERE account_status IS NULL",
     "UPDATE users SET lawyer_review_status = 'approved' WHERE role = 'lawyer' AND lawyer_review_status = 'none'",
     "UPDATE users SET lawyer_review_status = 'none' WHERE role <> 'lawyer' AND lawyer_review_status IS NULL",

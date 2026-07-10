@@ -25,7 +25,7 @@ def _memory_settings(**overrides):
 
 
 def _create_demo_case(store: InMemoryStore):
-  otp = store.request_login_code("13800001234")
+  otp = store.request_login_code("13800001234", purpose="register")
   session = store.register_client(
     ClientRegisterInput(
       phone="13800001234",

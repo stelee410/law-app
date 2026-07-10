@@ -128,6 +128,10 @@ ErrorCode = Literal[
   "RESPONSE_REQUIRED",
   "SEND_PROOF_CONFIRMATION_REQUIRED",
   "SEND_PROOF_REQUIRED",
+  "SMS_NOT_CONFIGURED",
+  "SMS_PROVIDER_ERROR",
+  "SMS_TEMPLATE_MISSING",
+  "SMS_TOO_FREQUENT",
 ]
 
 
@@ -235,7 +239,7 @@ class AuthToken(ApiModel):
 class LoginCodeResponse(ApiModel):
   phone: str
   expiresAt: str
-  mockCode: str
+  mockCode: str | None = None
 
 
 class ApiError(ApiModel):
@@ -306,15 +310,19 @@ class NotificationMessage(ApiModel):
   createdAt: str
 
 
-class RequestCodeInput(ApiModel):
-  phone: str = Field(min_length=6)
+class PhoneInput(ApiModel):
+  phone: str = Field(pattern=r"^1[3-9]\d{9}$")
 
 
-class LoginInput(RequestCodeInput):
+class RequestCodeInput(PhoneInput):
+  purpose: Literal["login", "register"] = "login"
+
+
+class LoginInput(PhoneInput):
   code: str = Field(min_length=4)
 
 
-class PasswordLoginInput(RequestCodeInput):
+class PasswordLoginInput(PhoneInput):
   password: str = Field(min_length=8, max_length=128)
 
 
