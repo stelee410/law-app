@@ -102,13 +102,29 @@ def evidence_summary(state: AssessmentState) -> AssessmentState:
   }
 
 
+def _format_case_amount(amount: float) -> str:
+  if amount <= 0:
+    return "未填写"
+  return f"￥{amount:,.0f}"
+
+
+def _amount_risk(amount: float) -> int:
+  if amount <= 0:
+    return 0
+  if amount > 200000:
+    return -8
+  if amount > 100000:
+    return -3
+  return 4
+
+
 def legal_fact_extraction(state: AssessmentState) -> AssessmentState:
   law_case = state["law_case"]
   copy = get_assessment_copy(law_case.caseType)
   facts = [
     f"业务类型：{get_case_type_label(law_case.caseType)}",
     f"{copy.subject_label}：{law_case.counterpartyName or law_case.debtorName}",
-    f"{copy.amount_label}：￥{law_case.amount:,.0f}",
+    f"{copy.amount_label}：{_format_case_amount(law_case.amount)}",
     f"地区：{law_case.region or '未填写'}",
     f"争议/审查时间：{law_case.incidentDate or law_case.contractDate}",
     f"诉求类型：{law_case.claimType or '未填写'}",
@@ -127,7 +143,7 @@ def risk_assessment(state: AssessmentState) -> AssessmentState:
   coverage = covered_required / required_categories if required_categories else 1
   due_bonus = 12 if law_case.dueStatus == "已到期" else 6 if law_case.dueStatus == "部分到期" else 0
   type_bonus = 6 if law_case.caseType in {"lawyer_letter", "contract_review"} else 0
-  amount_risk = -8 if law_case.amount > 200000 else -3 if law_case.amount > 100000 else 4
+  amount_risk = _amount_risk(law_case.amount)
   uploaded_bonus = min(state.get("uploaded_files", 0), 10) * 1.2
   score = round(48 + coverage * 24 + uploaded_bonus + due_bonus + type_bonus + amount_risk)
   bounded_score = max(42, min(92, score))
@@ -160,7 +176,7 @@ def report_generation(state: AssessmentState) -> AssessmentState:
   confidence = "高" if score >= 82 else "较高" if score >= 68 else "中等"
   estimated_recovery = round(law_case.amount * (1 if score >= 75 else 0.82 if score >= 62 else 0.65))
   findings = [
-    f"{copy.amount_label}：￥{law_case.amount:,.0f}",
+    f"{copy.amount_label}：{_format_case_amount(law_case.amount)}",
     f"已覆盖关键材料类型：{state.get('covered_required', 0)}/{state.get('required_categories', 0)}",
     f"当前已上传材料：{state.get('uploaded_files', 0)} 份",
     copy.timing_finding,

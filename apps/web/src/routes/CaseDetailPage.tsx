@@ -8,7 +8,7 @@ import { StateBlock } from '../components/StateBlock';
 import { useCaseEvents } from '../hooks/useCaseEvents';
 import { useApproveDocumentMutation, useCaseDocumentsQuery, useCaseQuery, useCaseWorkItemsQuery, useRecordFullServiceActionMutation, useRecordLawyerServiceActionMutation, useRecordSelfServiceActionMutation } from '../hooks/useCaseQueries';
 import { getCaseCatalogItem } from '../lib/caseCatalog';
-import { fileSizeLabel, formatDate, formatMoney } from '../lib/format';
+import { fileSizeLabel, formatCaseAmount, formatDate } from '../lib/format';
 import type { CaseStage, FullServiceActionInput, LawCase, LawyerServiceActionInput, SelfServiceActionInput } from '../lib/types';
 import { deriveLatestProgress, evidenceProgress, stageProgress } from '../lib/viewModel';
 
@@ -179,7 +179,7 @@ export function CaseDetailPage() {
             <p className="mt-1 break-words text-sm leading-5 text-slate-500">
               {catalog.label} · {lawCase.caseNo} · {formatDate(lawCase.createdAt)}
             </p>
-            <strong className="mt-4 block break-words text-3xl tracking-normal">{formatMoney(lawCase.amount)}</strong>
+            <strong className="mt-4 block break-words text-3xl tracking-normal">{formatCaseAmount(lawCase.amount)}</strong>
           </div>
         </div>
         <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
@@ -1190,7 +1190,7 @@ function buildSelfServiceLawyerLetter(lawCase: LawCase) {
     `案件编号：${lawCase.caseNo}`,
     '',
     '三、事实与诉求摘要',
-    `诉求金额/标的：人民币 ${context.amount} 元`,
+    ...(lawCase.amount > 0 ? [`诉求金额/标的：人民币 ${context.amount} 元`] : []),
     `争议概述：${context.dispute}`,
     `已上传或识别材料：${context.uploadedEvidence}。`,
     `证据缺口：${context.missingEvidence}。`,
@@ -1301,7 +1301,7 @@ function buildSelfServiceContractReview(lawCase: LawCase) {
     '',
     '一、审查对象',
     `合同相对方：${context.subject}`,
-    `合同金额：人民币 ${context.amount} 元`,
+    ...(lawCase.amount > 0 ? [`合同金额：人民币 ${context.amount} 元`] : []),
     `案件编号：${lawCase.caseNo}`,
     `交易背景：${context.dispute}`,
     `已上传或识别材料：${context.uploadedEvidence}。`,

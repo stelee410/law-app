@@ -6,6 +6,7 @@ import App from './App';
 import { caseKeys } from './hooks/useCaseQueries';
 import { api, apiUrl, resolveApiBaseUrl } from './lib/api';
 import * as apiModule from './lib/api';
+import { caseCatalog } from './lib/caseCatalog';
 import { queryClient } from './lib/queryClient';
 import { router } from './router';
 import { useAuthStore } from './state/authStore';
@@ -194,6 +195,20 @@ const assessedCase = {
         features: ['律师签章定稿文书', '客户自行发送后上传凭证', '律师确认凭证并跟进回应']
       }
     ]
+  }
+};
+
+const zeroAmountOptionalCase = {
+  ...assessedCase,
+  id: 'case-zero-amount',
+  caseType: 'contract_review',
+  debtorName: '零金额合同相对方',
+  counterpartyName: '零金额合同相对方',
+  amount: 0,
+  assessment: {
+    ...assessedCase.assessment,
+    estimatedRecovery: 0,
+    findings: ['合同金额：未填写']
   }
 };
 
@@ -600,7 +615,7 @@ const contractReviewSelfServiceCase = {
   debtorName: '合同审查测试交易方',
   counterpartyName: '合同审查测试交易方',
   partyRole: '合同签署方',
-  amount: 50000,
+  amount: 0,
   dispute: '准备签署服务合同，希望识别付款、违约和解除条款风险。',
   claimSummary: '准备签署服务合同，希望识别付款、违约和解除条款风险。',
   stages: nonDebtSelfServiceStages,
@@ -646,7 +661,7 @@ const nonDebtLegacySelfServiceFixtures = [
       debtorName: '海南有钱公司',
       counterpartyName: '海南有钱公司',
       partyRole: '权利主张方',
-      amount: 80000,
+      amount: 0,
       dispute: '相对方未按约履行合作义务，需要普通函件草稿进行事实核对和履行提醒。',
       claimSummary: '需要函件草稿提醒对方核对事实、限期回复并保留沟通记录。',
       stages: nonDebtSelfServiceStages,
@@ -671,7 +686,8 @@ const nonDebtLegacySelfServiceFixtures = [
     expectedTitle: '致海南有钱公司的函件草稿（AI 自助模板）',
     expectedHeading: '法律依据与适用提示',
     expectedLaw: /《中华人民共和国律师法》第二十八条/,
-    forbiddenText: /付款催告函|欠款追偿|债务人/
+    forbiddenText: /付款催告函|欠款追偿|债务人/,
+    forbiddenAmountText: '诉求金额/标的：人民币 0 元'
   },
   {
     caseId: 'case-labor-dispute',
@@ -708,7 +724,8 @@ const nonDebtLegacySelfServiceFixtures = [
     expectedTitle: '劳动仲裁申请建议书（AI 自助模板）',
     expectedHeading: '法律依据与适用提示',
     expectedLaw: /《中华人民共和国劳动争议调解仲裁法》第二十七条/,
-    forbiddenText: /付款催告函|欠款追偿|债务人/
+    forbiddenText: /付款催告函|欠款追偿|债务人/,
+    forbiddenAmountText: null
   },
   {
     caseId: 'case-rental-dispute',
@@ -745,7 +762,8 @@ const nonDebtLegacySelfServiceFixtures = [
     expectedTitle: '租赁纠纷协商函（AI 自助模板）',
     expectedHeading: '法律依据与适用提示',
     expectedLaw: /《中华人民共和国民法典》第七百二十二条/,
-    forbiddenText: /付款催告函|欠款追偿|债务人/
+    forbiddenText: /付款催告函|欠款追偿|债务人/,
+    forbiddenAmountText: null
   },
   {
     caseId: 'case-contract-review',
@@ -755,7 +773,8 @@ const nonDebtLegacySelfServiceFixtures = [
     expectedTitle: '合同审查意见（AI 自助模板）',
     expectedHeading: '法律依据与审查口径',
     expectedLaw: /《中华人民共和国民法典》第四百九十六条/,
-    forbiddenText: /付款催告函|欠款追偿|债务人|发送律师函/
+    forbiddenText: /付款催告函|欠款追偿|债务人|发送律师函/,
+    forbiddenAmountText: '合同金额：人民币 0 元'
   }
 ];
 
@@ -953,6 +972,76 @@ describe('App', () => {
     expect(window.location.search).toContain('caseType=labor_dispute');
   });
 
+  it.each([
+    'debt_collection',
+    'lawyer_letter',
+    'labor_dispute',
+    'rental_dispute',
+    'contract_review'
+  ] as const)('requires non-blank descriptions without a business minimum length for %s', (caseType) => {
+    const fields = caseCatalog[caseType].fields;
+    const dispute = fields.find((field) => field.id === 'dispute');
+    const claimSummary = fields.find((field) => field.id === 'claimSummary');
+
+    expect(dispute).toMatchObject({ required: true });
+    expect(dispute?.minLength).toBeUndefined();
+    expect(claimSummary).toMatchObject({ required: true });
+    expect(claimSummary?.minLength).toBeUndefined();
+  });
+
+  it('blocks blank descriptions and submits one-character descriptions with guidance', async () => {
+    const user = userEvent.setup();
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    await router.navigate({ to: '/cases/new', search: { caseType: 'debt_collection' } });
+    vi.spyOn(apiModule, 'createLawCase').mockImplementation(async (input) => {
+      createdCasePayload = input;
+      return { ...testCase, ...input, id: 'case-created' };
+    });
+
+    render(<App />);
+
+    await user.type(await screen.findByLabelText('债务人/公司'), '测试公司');
+    await user.type(screen.getByLabelText('欠款金额'), '1000');
+    await user.type(screen.getByLabelText('合同/借款日期'), '2026-07-01');
+    await user.click(screen.getByRole('button', { name: '下一步' }));
+
+    await user.type(await screen.findByLabelText('联系人'), '测试用户');
+    await user.type(screen.getByLabelText('联系电话'), '13800007777');
+    await user.type(screen.getByLabelText('所在地区'), '上海');
+    await user.type(screen.getByLabelText('你的身份'), '债权人');
+    await user.click(screen.getByRole('button', { name: '下一步' }));
+
+    const dispute = await screen.findByPlaceholderText('简要说明事实、关键时间和当前卡点');
+    const claimSummary = screen.getByPlaceholderText('说明你希望平台协助达成的结果');
+    const submit = screen.getByRole('button', { name: '下一步：上传证据' });
+    await user.type(dispute, '   ');
+    await user.type(claimSummary, '   ');
+    await user.click(screen.getByRole('checkbox'));
+    expect(submit).toBeDisabled();
+
+    await user.clear(dispute);
+    await user.clear(claimSummary);
+    await user.type(dispute, '欠');
+    await user.type(claimSummary, '追');
+    expect(submit).toBeEnabled();
+    expect(screen.getByText('简单描述即可，后续会结合证据协助你补充关键信息。', { exact: false })).toBeInTheDocument();
+
+    await user.click(submit);
+    await waitFor(() =>
+      expect(createdCasePayload).toMatchObject({
+        caseType: 'debt_collection',
+        dispute: '欠',
+        claimSummary: '追',
+        privacyConsent: true
+      })
+    );
+  });
+
   it('submits typed case payload with caseType and privacyConsent', async () => {
     const user = userEvent.setup();
     useAuthStore.getState().setSession({
@@ -990,11 +1079,46 @@ describe('App', () => {
     await waitFor(() =>
       expect(createdCasePayload).toMatchObject({
         caseType: 'lawyer_letter',
+        amount: 0,
         privacyConsent: true,
         debtorName: '上海某公司',
         claimType: '付款催告'
       })
     );
+    await waitFor(() => expect(window.location.pathname).toBe('/cases/case-created/evidence'));
+  });
+
+  it('opens and closes the new case help dialog without changing the form', async () => {
+    const user = userEvent.setup();
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    await router.navigate({ to: '/cases/new', search: { caseType: 'lawyer_letter' } });
+
+    render(<App />);
+
+    const helpButton = await screen.findByRole('button', { name: '帮助' });
+    await user.type(await screen.findByLabelText('收函方名称'), '保留中的表单内容');
+    await user.click(helpButton);
+
+    const dialog = await screen.findByRole('dialog', { name: '不知道怎么填？' });
+    expect(within(dialog).getByText('对方收货后一直没付款。')).toBeInTheDocument();
+    expect(within(dialog).getByText('希望对方尽快付款。')).toBeInTheDocument();
+    expect(within(dialog).getByText(/下一步可上传合同、聊天记录、转账或付款凭证/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: '关闭帮助' })).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(helpButton).toHaveFocus();
+    expect(screen.getByLabelText('收函方名称')).toHaveValue('保留中的表单内容');
+
+    await user.click(helpButton);
+    await user.click(await screen.findByRole('button', { name: '关闭帮助' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(helpButton).toHaveFocus();
   });
 
   it('renders login when no token exists', async () => {
@@ -1333,6 +1457,24 @@ describe('App', () => {
     expect(await screen.findByRole('link', { name: '案件' })).toBeInTheDocument();
   });
 
+  it('shows an unfilled optional amount in the admin case list', async () => {
+    useAuthStore.getState().setSession({
+      token: 'admin-token',
+      user: testAdmin,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testAdmin);
+    queryClient.setQueryData(caseKeys.adminCases, [zeroAmountOptionalCase]);
+    await router.navigate({ to: '/admin/cases' as never });
+
+    render(<App />);
+
+    const amountCard = (await screen.findByText('登记金额')).parentElement;
+    expect(amountCard).not.toBeNull();
+    expect(within(amountCard as HTMLElement).getByText('未填写')).toBeInTheDocument();
+    expect(within(amountCard as HTMLElement).queryByText('￥0')).not.toBeInTheDocument();
+  });
+
   it('renders built-in legal document pages', async () => {
     await router.navigate({ to: '/legal/terms' });
     render(<App />);
@@ -1386,6 +1528,38 @@ describe('App', () => {
     expect(await screen.findByText('78%')).toBeInTheDocument();
     expect(await screen.findByText('选择服务方案')).toBeInTheDocument();
     expect(await screen.findByText('法灵平台保障')).toBeInTheDocument();
+  });
+
+  it('shows an unfilled optional amount on the case card, detail, and assessment', async () => {
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    queryClient.setQueryData(caseKeys.lists, [zeroAmountOptionalCase]);
+    queryClient.setQueryData(caseKeys.detail('case-zero-amount'), zeroAmountOptionalCase);
+    queryClient.setQueryData(caseKeys.workItems('case-zero-amount'), []);
+    queryClient.setQueryData(caseKeys.documents('case-zero-amount'), []);
+    await router.navigate({ to: '/' });
+
+    render(<App />);
+
+    const caseLink = (await screen.findByText('零金额合同相对方')).closest('a');
+    expect(caseLink).not.toBeNull();
+    expect(within(caseLink as HTMLElement).getByText('未填写')).toBeInTheDocument();
+    expect(within(caseLink as HTMLElement).queryByText('￥0')).not.toBeInTheDocument();
+
+    await router.navigate({ to: '/cases/$caseId', params: { caseId: 'case-zero-amount' } });
+    expect(await screen.findByText('案件进度')).toBeInTheDocument();
+    expect(screen.getByText('未填写')).toBeInTheDocument();
+    expect(screen.queryByText('￥0')).not.toBeInTheDocument();
+
+    await router.navigate({ to: '/cases/$caseId/assessment', params: { caseId: 'case-zero-amount' } });
+    const recoveryCard = (await screen.findByText('预计回收')).parentElement?.parentElement;
+    expect(recoveryCard).not.toBeNull();
+    expect(within(recoveryCard as HTMLElement).getByText('未填写')).toBeInTheDocument();
+    expect(within(recoveryCard as HTMLElement).queryByText('￥0')).not.toBeInTheDocument();
   });
 
   it('hides the plan entry after a service plan is selected', async () => {
@@ -1594,6 +1768,28 @@ describe('App', () => {
     expect(await screen.findByText('律师工作台')).toBeInTheDocument();
     expect(await screen.findByText('待处理 1')).toBeInTheDocument();
     expect(await screen.findByText('律师复核待办')).toBeInTheDocument();
+  });
+
+  it('shows an unfilled optional amount in the lawyer task workspace', async () => {
+    useAuthStore.getState().setSession({
+      token: 'lawyer-token',
+      user: testLawyer,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testLawyer);
+    queryClient.setQueryData(caseKeys.lawyerTask('task-review'), {
+      task: { ...lawyerTask, caseId: 'case-zero-amount' },
+      case: zeroAmountOptionalCase
+    });
+    queryClient.setQueryData(caseKeys.lawyerDocuments('case-zero-amount'), []);
+    await router.navigate({ to: '/lawyer/tasks/$taskId', params: { taskId: 'task-review' } });
+
+    render(<App />);
+
+    const amountRow = (await screen.findByText('金额：')).parentElement;
+    expect(amountRow).not.toBeNull();
+    expect(amountRow).toHaveTextContent('金额：未填写');
+    expect(amountRow).not.toHaveTextContent('￥0');
   });
 
   it('renders send proof review task and lets lawyer confirm proof', async () => {
@@ -1891,7 +2087,7 @@ describe('App', () => {
     expect(screen.queryByText(/律师函催告 → 协商调解 → 立案追偿/)).not.toBeInTheDocument();
   });
 
-  it.each(nonDebtLegacySelfServiceFixtures)('upgrades stale $caseId self-service previews with case-specific legal basis', async ({ caseId, lawCase, workItems, document, expectedTitle, expectedHeading, expectedLaw, forbiddenText }) => {
+  it.each(nonDebtLegacySelfServiceFixtures)('upgrades stale $caseId self-service previews with case-specific legal basis', async ({ caseId, lawCase, workItems, document, expectedTitle, expectedHeading, expectedLaw, forbiddenText, forbiddenAmountText }) => {
     useAuthStore.getState().setSession({
       token: 'test-token',
       user: testUser,
@@ -1911,6 +2107,7 @@ describe('App', () => {
     expect(await screen.findByText('旧版补全')).toBeInTheDocument();
     expect(screen.queryByText('付款催告函（AI 自助模板）')).not.toBeInTheDocument();
     expect(screen.queryByText(forbiddenText)).not.toBeInTheDocument();
+    if (forbiddenAmountText) expect(screen.queryByText(forbiddenAmountText)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '复制催告文案' })).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: '复制模板内容' })).toBeInTheDocument();
   });

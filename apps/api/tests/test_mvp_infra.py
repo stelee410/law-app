@@ -10,6 +10,7 @@ from app.evidence import service as evidence_service
 from app.evidence.service import upload_evidence
 from app.schemas import AssessmentResult, CaseType, ClientRegisterInput, CreateCaseInput
 from app.store import InMemoryStore
+from app.workflows import case_assessment as assessment_workflow
 from app.workflows.case_assessment import assess_case
 
 
@@ -22,6 +23,32 @@ def _memory_settings(**overrides):
   }
   values.update(overrides)
   return Settings(**values)
+
+
+@pytest.mark.parametrize(
+  ("amount", "expected"),
+  [
+    (0, "未填写"),
+    (125000, "￥125,000"),
+  ],
+)
+def test_case_amount_formatting_distinguishes_unfilled_amount(amount: float, expected: str) -> None:
+  assert assessment_workflow._format_case_amount(amount) == expected
+
+
+@pytest.mark.parametrize(
+  ("amount", "expected"),
+  [
+    (0, 0),
+    (1, 4),
+    (100000, 4),
+    (100000.01, -3),
+    (200000, -3),
+    (200000.01, -8),
+  ],
+)
+def test_case_amount_risk_treats_unfilled_amount_as_neutral(amount: float, expected: int) -> None:
+  assert assessment_workflow._amount_risk(amount) == expected
 
 
 def _create_demo_case(store: InMemoryStore):
@@ -45,6 +72,7 @@ def _create_demo_case(store: InMemoryStore):
       amount=88600,
       contractDate="2026-06-20",
       dispute="对方确认收货后长期拖欠尾款，已有催收记录和送货凭证。",
+      claimSummary="追回拖欠尾款",
       dueStatus="已到期",
     ),
   )
@@ -267,6 +295,7 @@ def test_create_case_requires_privacy_consent() -> None:
       amount=68000,
       contractDate="2026-06-20",
       dispute="This matter has enough facts for privacy consent validation.",
+      claimSummary="Validate privacy consent before creating the case.",
       dueStatus="已到期",
       privacyConsent=False,
     )

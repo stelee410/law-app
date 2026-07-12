@@ -5,6 +5,7 @@ import { SectionHeader } from '../components/h5/SectionHeader';
 import { StateBlock } from '../components/StateBlock';
 import { useLawyerCaseDocumentsQuery, useLawyerTaskQuery, useRecordLawyerFullServiceActionMutation, useSubmitDocumentMutation, useSubmitReviewMutation } from '../hooks/useCaseQueries';
 import { getLawyerEvidenceFile } from '../lib/api';
+import { formatCaseAmount } from '../lib/format';
 import type { EvidenceFile, FullServiceResponse, ReviewNextAction, RiskLevel } from '../lib/types';
 
 const nextActionOptions: Array<{ value: ReviewNextAction; label: string }> = [
@@ -129,7 +130,7 @@ export function LawyerTaskPage() {
         <SectionHeader title="案件资料" subtitle="律师复核前需核对事实、证据和 AI 评估" />
         <div className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
           <p><b>相对方：</b>{lawCase.counterpartyName || lawCase.debtorName}</p>
-          <p><b>金额：</b>￥{lawCase.amount.toLocaleString()}</p>
+          <p><b>金额：</b>{formatCaseAmount(lawCase.amount)}</p>
           <p><b>争议摘要：</b>{lawCase.claimSummary || lawCase.dispute}</p>
           <p><b>AI 建议：</b>{lawCase.assessment?.suggestedRoute ?? '待评估'}</p>
         </div>

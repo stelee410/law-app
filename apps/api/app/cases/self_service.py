@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -282,12 +283,23 @@ def forbidden_self_service_terms(case_type: CaseType) -> tuple[str, ...]:
   return forbidden
 
 
-def validate_self_service_body(case_type: CaseType, body: str) -> bool:
+def validate_self_service_body(law_case: LawCase, body: str) -> bool:
+  case_type = normalize_case_type(law_case.caseType)
   if "法律依据" not in body:
     return False
   if any(term not in body for term in required_self_service_terms(case_type)):
     return False
-  return not any(term in body for term in forbidden_self_service_terms(case_type))
+  if any(term in body for term in forbidden_self_service_terms(case_type)):
+    return False
+  if law_case.amount <= 0 and case_type in {"lawyer_letter", "contract_review"}:
+    zero_amount_patterns = (
+      r"[￥¥]\s*0(?:[.,]0+)?(?:\s*元)?",
+      r"人民币\s*0(?:[.,]0+)?\s*元",
+      r"(?:金额|标的)[^\n。]{0,12}(?:：|:|为)\s*0(?:[.,]0+)?\s*元?",
+    )
+    if any(re.search(pattern, body) for pattern in zero_amount_patterns):
+      return False
+  return True
 
 
 def _build_body(law_case: LawCase, template: _SelfServiceTemplate, title: str) -> str:
@@ -373,7 +385,7 @@ def _build_lawyer_letter_body(law_case: LawCase, template: _SelfServiceTemplate,
     "",
     "三、事实与诉求摘要",
     f"业务类型：{get_case_type_label(law_case.caseType)}",
-    f"诉求金额/标的：人民币 {law_case.amount:,.0f} 元",
+    *([f"诉求金额/标的：人民币 {law_case.amount:,.0f} 元"] if law_case.amount > 0 else []),
     f"争议概述：{context['dispute']}",
     f"已上传或识别材料：{context['evidence_names']}。",
     f"证据缺口：{context['missing']}。",
@@ -498,7 +510,7 @@ def _build_contract_review_body(law_case: LawCase, template: _SelfServiceTemplat
     "",
     "一、审查对象",
     f"合同相对方：{context['subject']}",
-    f"合同金额：人民币 {law_case.amount:,.0f} 元",
+    *([f"合同金额：人民币 {law_case.amount:,.0f} 元"] if law_case.amount > 0 else []),
     f"案件编号：{law_case.caseNo}",
     f"交易背景：{context['dispute']}",
     f"已上传或识别材料：{context['evidence_names']}。",
