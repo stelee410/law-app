@@ -388,16 +388,23 @@ class CreateCaseInput(ApiModel):
   contactPhone: str = Field(min_length=6)
   amount: float = Field(gt=0)
   contractDate: str = Field(min_length=8)
-  dispute: str = Field(min_length=10)
+  dispute: str
   dueStatus: DueStatus
   partyRole: str = ""
   counterpartyName: str | None = None
   region: str = ""
   incidentDate: str = ""
   claimType: str = ""
-  claimSummary: str = ""
+  claimSummary: str
   privacyConsent: bool = True
   matterFields: dict[str, Any] = Field(default_factory=dict)
+
+  @field_validator("dispute", "claimSummary")
+  @classmethod
+  def require_non_blank_case_text(cls, value: str) -> str:
+    if not value.strip():
+      raise ValueError("CASE_TEXT_REQUIRED")
+    return value
 
   @field_validator("privacyConsent")
   @classmethod

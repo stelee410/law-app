@@ -6,6 +6,7 @@ import App from './App';
 import { caseKeys } from './hooks/useCaseQueries';
 import { api, apiUrl, resolveApiBaseUrl } from './lib/api';
 import * as apiModule from './lib/api';
+import { caseCatalog } from './lib/caseCatalog';
 import { queryClient } from './lib/queryClient';
 import { router } from './router';
 import { useAuthStore } from './state/authStore';
@@ -951,6 +952,76 @@ describe('App', () => {
     expect(await screen.findByText('发起劳动争议')).toBeInTheDocument();
     expect(await screen.findByLabelText('用人单位')).toBeInTheDocument();
     expect(window.location.search).toContain('caseType=labor_dispute');
+  });
+
+  it.each([
+    'debt_collection',
+    'lawyer_letter',
+    'labor_dispute',
+    'rental_dispute',
+    'contract_review'
+  ] as const)('requires non-blank descriptions without a business minimum length for %s', (caseType) => {
+    const fields = caseCatalog[caseType].fields;
+    const dispute = fields.find((field) => field.id === 'dispute');
+    const claimSummary = fields.find((field) => field.id === 'claimSummary');
+
+    expect(dispute).toMatchObject({ required: true });
+    expect(dispute?.minLength).toBeUndefined();
+    expect(claimSummary).toMatchObject({ required: true });
+    expect(claimSummary?.minLength).toBeUndefined();
+  });
+
+  it('blocks blank descriptions and submits one-character descriptions with guidance', async () => {
+    const user = userEvent.setup();
+    useAuthStore.getState().setSession({
+      token: 'test-token',
+      user: testUser,
+      expiresAt: '2026-07-30T00:00:00.000Z'
+    });
+    queryClient.setQueryData(caseKeys.me, testUser);
+    await router.navigate({ to: '/cases/new', search: { caseType: 'debt_collection' } });
+    vi.spyOn(apiModule, 'createLawCase').mockImplementation(async (input) => {
+      createdCasePayload = input;
+      return { ...testCase, ...input, id: 'case-created' };
+    });
+
+    render(<App />);
+
+    await user.type(await screen.findByLabelText('债务人/公司'), '测试公司');
+    await user.type(screen.getByLabelText('欠款金额'), '1000');
+    await user.type(screen.getByLabelText('合同/借款日期'), '2026-07-01');
+    await user.click(screen.getByRole('button', { name: '下一步' }));
+
+    await user.type(await screen.findByLabelText('联系人'), '测试用户');
+    await user.type(screen.getByLabelText('联系电话'), '13800007777');
+    await user.type(screen.getByLabelText('所在地区'), '上海');
+    await user.type(screen.getByLabelText('你的身份'), '债权人');
+    await user.click(screen.getByRole('button', { name: '下一步' }));
+
+    const dispute = await screen.findByPlaceholderText('简要说明事实、关键时间和当前卡点');
+    const claimSummary = screen.getByPlaceholderText('说明你希望平台协助达成的结果');
+    const submit = screen.getByRole('button', { name: '下一步：上传证据' });
+    await user.type(dispute, '   ');
+    await user.type(claimSummary, '   ');
+    await user.click(screen.getByRole('checkbox'));
+    expect(submit).toBeDisabled();
+
+    await user.clear(dispute);
+    await user.clear(claimSummary);
+    await user.type(dispute, '欠');
+    await user.type(claimSummary, '追');
+    expect(submit).toBeEnabled();
+    expect(screen.getByText('简单描述即可，后续会结合证据协助你补充关键信息。', { exact: false })).toBeInTheDocument();
+
+    await user.click(submit);
+    await waitFor(() =>
+      expect(createdCasePayload).toMatchObject({
+        caseType: 'debt_collection',
+        dispute: '欠',
+        claimSummary: '追',
+        privacyConsent: true
+      })
+    );
   });
 
   it('submits typed case payload with caseType and privacyConsent', async () => {

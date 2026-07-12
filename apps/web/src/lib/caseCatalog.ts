@@ -27,6 +27,7 @@ export type CaseCatalogItem = {
 };
 
 const dueStatusOptions = ['已到期', '部分到期', '不确定'];
+const shortDescriptionGuidance = '简单描述即可，后续会结合证据协助你补充关键信息。';
 
 const baseContactFields: CaseField[] = [
   { id: 'contactName', label: '联系人', type: 'text', step: 1, required: true, minLength: 2 },
@@ -41,7 +42,6 @@ const claimSummaryField: CaseField = {
   type: 'textarea',
   step: 2,
   required: true,
-  minLength: 8,
   placeholder: '说明你希望平台协助达成的结果'
 };
 
@@ -51,7 +51,6 @@ const disputeField: CaseField = {
   type: 'textarea',
   step: 2,
   required: true,
-  minLength: 10,
   placeholder: '简要说明事实、关键时间和当前卡点'
 };
 
@@ -75,7 +74,7 @@ export const caseCatalog: Record<CaseType, CaseCatalogItem> = {
     ],
     claimOptions: ['催收回款', '律师函催告', '诉前调解', '起诉准备'],
     defaultMatterFields: { paymentEvidence: '', reminderCount: '' },
-    boundaryCopy: '平台会根据欠款事实生成证据 checklist，并进入上传与评估流程。',
+    boundaryCopy: `${shortDescriptionGuidance} 平台会根据欠款事实生成证据 checklist，并进入上传与评估流程。`,
     privacyCopy: '我同意平台仅为案件处理、证据评估和服务推荐使用上述信息。'
   },
   lawyer_letter: {
@@ -96,7 +95,7 @@ export const caseCatalog: Record<CaseType, CaseCatalogItem> = {
     ],
     claimOptions: ['付款催告', '履约催告', '侵权制止', '解除/终止通知'],
     defaultMatterFields: { deliveryAddress: '', letterDeadline: '' },
-    boundaryCopy: '律师函服务会先核对事实与送达信息，复杂争议需律师进一步确认。',
+    boundaryCopy: `${shortDescriptionGuidance} 律师函服务会先核对事实与送达信息，复杂争议需律师进一步确认。`,
     privacyCopy: '我同意平台为生成、审核和送达律师函处理上述信息。'
   },
   labor_dispute: {
@@ -117,7 +116,7 @@ export const caseCatalog: Record<CaseType, CaseCatalogItem> = {
     ],
     claimOptions: ['拖欠工资', '违法解除', '经济补偿', '工伤/社保', '加班费'],
     defaultMatterFields: { employmentType: '', salaryStandard: '' },
-    boundaryCopy: '劳动争议会优先梳理仲裁时效、劳动关系证据和可主张项目。',
+    boundaryCopy: `${shortDescriptionGuidance} 劳动争议会优先梳理仲裁时效、劳动关系证据和可主张项目。`,
     privacyCopy: '我同意平台为劳动争议评估和服务推荐使用上述个人与用工信息。'
   },
   rental_dispute: {
@@ -138,7 +137,7 @@ export const caseCatalog: Record<CaseType, CaseCatalogItem> = {
     ],
     claimOptions: ['押金退还', '租金欠付', '提前退租', '房屋维修', '违约赔偿'],
     defaultMatterFields: { propertyAddress: '', depositAmount: '' },
-    boundaryCopy: '租赁纠纷会围绕合同、交割、付款和沟通记录生成证据清单。',
+    boundaryCopy: `${shortDescriptionGuidance} 租赁纠纷会围绕合同、交割、付款和沟通记录生成证据清单。`,
     privacyCopy: '我同意平台为租赁纠纷处理和评估使用上述房屋与合同信息。'
   },
   contract_review: {
@@ -160,14 +159,13 @@ export const caseCatalog: Record<CaseType, CaseCatalogItem> = {
         type: 'textarea',
         step: 2,
         required: true,
-        minLength: 10,
         placeholder: '说明交易背景、担心的风险或希望重点审查的条款'
       },
       claimSummaryField
     ],
     claimOptions: ['付款条款', '违约责任', '解除条款', '交付验收', '知识产权', '整体风险'],
     defaultMatterFields: { contractScenario: '', reviewDeadline: '' },
-    boundaryCopy: '合同审查 MVP 会先输出风险摘要和证据/材料清单，不替代律师正式出具法律意见。',
+    boundaryCopy: `${shortDescriptionGuidance} 合同审查 MVP 会先输出风险摘要和证据/材料清单，不替代律师正式出具法律意见。`,
     privacyCopy: '我同意平台为合同风险审查和服务推荐处理上述合同信息。'
   }
 };

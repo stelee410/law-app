@@ -45,6 +45,7 @@ def _create_demo_case(store: InMemoryStore):
       amount=88600,
       contractDate="2026-06-20",
       dispute="对方确认收货后长期拖欠尾款，已有催收记录和送货凭证。",
+      claimSummary="追回拖欠尾款",
       dueStatus="已到期",
     ),
   )
@@ -267,6 +268,7 @@ def test_create_case_requires_privacy_consent() -> None:
       amount=68000,
       contractDate="2026-06-20",
       dispute="This matter has enough facts for privacy consent validation.",
+      claimSummary="Validate privacy consent before creating the case.",
       dueStatus="已到期",
       privacyConsent=False,
     )

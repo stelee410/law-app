@@ -30,6 +30,83 @@ def _test_settings(**overrides) -> Settings:
   return Settings(**values)
 
 
+def _case_create_payload(case_type: str = "debt_collection", **overrides: object) -> dict[str, object]:
+  payload: dict[str, object] = {
+    "caseType": case_type,
+    "debtorName": "测试相对方",
+    "contactName": "测试用户",
+    "contactPhone": "13800007777",
+    "amount": 1000,
+    "contractDate": "2026-07-01",
+    "dispute": "对方确认欠款后一直没有按约付款。",
+    "dueStatus": "已到期",
+    "partyRole": "权利主张方",
+    "counterpartyName": "测试相对方",
+    "region": "上海",
+    "claimType": "测试诉求",
+    "claimSummary": "希望追回拖欠款项。",
+    "privacyConsent": True,
+  }
+  payload.update(overrides)
+  return payload
+
+
+@pytest.mark.parametrize(
+  "case_type",
+  ["debt_collection", "lawyer_letter", "labor_dispute", "rental_dispute", "contract_review"],
+)
+def test_case_creation_accepts_short_non_blank_descriptions(case_type: str) -> None:
+  client = TestClient(create_app(_test_settings()))
+  headers = _register_client(client)
+
+  created = client.post(
+    "/api/v1/cases",
+    headers=headers,
+    json=_case_create_payload(case_type, dispute="欠", claimSummary="追"),
+  )
+
+  assert created.status_code == 201
+  assert created.json()["case"]["caseType"] == case_type
+  assert created.json()["case"]["dispute"] == "欠"
+  assert created.json()["case"]["claimSummary"] == "追"
+
+
+@pytest.mark.parametrize(
+  ("field_name", "blank_value"),
+  [
+    ("dispute", "   "),
+    ("dispute", "\u3000"),
+    ("claimSummary", "   "),
+    ("claimSummary", "\u3000"),
+  ],
+)
+def test_case_creation_rejects_blank_descriptions(field_name: str, blank_value: str) -> None:
+  client = TestClient(create_app(_test_settings()))
+  headers = _register_client(client)
+
+  created = client.post(
+    "/api/v1/cases",
+    headers=headers,
+    json=_case_create_payload(**{field_name: blank_value}),
+  )
+
+  assert created.status_code == 422
+  assert any(item["loc"][-1] == field_name for item in created.json()["detail"])
+
+
+@pytest.mark.parametrize("field_name", ["dispute", "claimSummary"])
+def test_case_creation_requires_description_fields(field_name: str) -> None:
+  client = TestClient(create_app(_test_settings()))
+  headers = _register_client(client)
+  payload = _case_create_payload()
+  payload.pop(field_name)
+
+  created = client.post("/api/v1/cases", headers=headers, json=payload)
+
+  assert created.status_code == 422
+  assert any(item["loc"][-1] == field_name for item in created.json()["detail"])
+
+
 def test_minimal_case_workflow() -> None:
   client = TestClient(create_app(_test_settings()))
   headers = _register_client(client)
