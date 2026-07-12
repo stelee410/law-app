@@ -1,7 +1,7 @@
 import { Link, useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, ArrowRight, Check, HelpCircle, ShieldCheck } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { useCreateCaseMutation } from '../hooks/useCaseQueries';
 import { getCaseCatalogItem, isCaseType } from '../lib/caseCatalog';
 import type { CaseField } from '../lib/caseCatalog';
@@ -54,9 +54,16 @@ export function NewCasePage() {
   const caseType = isCaseType(searchCaseType) ? searchCaseType : 'debt_collection';
   const catalog = getCaseCatalogItem(caseType);
   const [step, setStep] = useState(0);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [privacyTouched, setPrivacyTouched] = useState(false);
   const [form, setForm] = useState<CreateCaseInput>(() => defaultCase(caseType));
+  const helpButtonRef = useRef<HTMLButtonElement>(null);
   const stepFields = useMemo(() => catalog.fields.filter((field) => field.step === step), [catalog.fields, step]);
+
+  function closeHelp() {
+    setHelpOpen(false);
+    helpButtonRef.current?.focus();
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -101,7 +108,10 @@ export function NewCasePage() {
         title={catalog.formTitle}
         description={catalog.description}
         onBack={() => (step === 0 ? navigate({ to: '/' }) : setStep((value) => value - 1))}
+        onHelp={() => setHelpOpen(true)}
+        helpButtonRef={helpButtonRef}
       />
+      {helpOpen && <HelpDialog onClose={closeHelp} />}
       <section className="space-y-4 rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
         {stepFields.map((field) => (
           <Field key={String(field.id)} label={field.label}>
@@ -201,7 +211,21 @@ function CaseInput({
   );
 }
 
-function Header({ step, title, description, onBack }: { step: number; title: string; description: string; onBack: () => void }) {
+function Header({
+  step,
+  title,
+  description,
+  onBack,
+  onHelp,
+  helpButtonRef
+}: {
+  step: number;
+  title: string;
+  description: string;
+  onBack: () => void;
+  onHelp: () => void;
+  helpButtonRef: RefObject<HTMLButtonElement | null>;
+}) {
   const labels = ['基本信息', '联系方式', '诉求描述'];
   return (
     <header className="space-y-4">
@@ -210,7 +234,13 @@ function Header({ step, title, description, onBack }: { step: number; title: str
           <ArrowLeft size={17} />
           返回
         </button>
-        <button className="flex items-center gap-1 rounded-lg bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700" type="button">
+        <button
+          ref={helpButtonRef}
+          className="flex items-center gap-1 rounded-lg bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700"
+          type="button"
+          aria-haspopup="dialog"
+          onClick={onHelp}
+        >
           <HelpCircle size={16} />
           帮助
         </button>
@@ -226,6 +256,52 @@ function Header({ step, title, description, onBack }: { step: number; title: str
         ))}
       </div>
     </header>
+  );
+}
+
+function HelpDialog({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-4 sm:items-center">
+      <section
+        className="w-full max-w-sm space-y-4 rounded-2xl bg-white p-5 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-case-help-title"
+      >
+        <div>
+          <h2 id="new-case-help-title" className="text-xl font-black text-slate-950">不知道怎么填？</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">简单写清楚两件事即可，后续还可以结合证据继续补充。</p>
+        </div>
+        <ol className="space-y-2 text-sm leading-6 text-slate-700">
+          <li><b>1. 选择案件类型：</b>选择最接近当前问题的一类。</li>
+          <li><b>2. 填写基本信息：</b>填写事项、联系人和联系方式。</li>
+          <li><b>3. 用一句话描述：</b>分别说明“发生了什么”和“希望什么结果”。</li>
+        </ol>
+        <div className="space-y-2 rounded-xl bg-blue-50 p-4 text-sm leading-6 text-blue-950">
+          <p><b>发生了什么：</b>对方收货后一直没付款。</p>
+          <p><b>希望什么结果：</b>希望对方尽快付款。</p>
+        </div>
+        <p className="rounded-xl bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+          下一步可上传合同、聊天记录、转账或付款凭证等，系统会结合材料继续梳理。
+        </p>
+        <button
+          className="h-11 w-full rounded-lg bg-blue-600 font-black text-white"
+          type="button"
+          autoFocus
+          onClick={onClose}
+        >
+          关闭帮助
+        </button>
+      </section>
+    </div>
   );
 }
 

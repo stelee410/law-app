@@ -10,6 +10,7 @@ from app.evidence import service as evidence_service
 from app.evidence.service import upload_evidence
 from app.schemas import AssessmentResult, CaseType, ClientRegisterInput, CreateCaseInput
 from app.store import InMemoryStore
+from app.workflows import case_assessment as assessment_workflow
 from app.workflows.case_assessment import assess_case
 
 
@@ -22,6 +23,32 @@ def _memory_settings(**overrides):
   }
   values.update(overrides)
   return Settings(**values)
+
+
+@pytest.mark.parametrize(
+  ("amount", "expected"),
+  [
+    (0, "未填写"),
+    (125000, "￥125,000"),
+  ],
+)
+def test_case_amount_formatting_distinguishes_unfilled_amount(amount: float, expected: str) -> None:
+  assert assessment_workflow._format_case_amount(amount) == expected
+
+
+@pytest.mark.parametrize(
+  ("amount", "expected"),
+  [
+    (0, 0),
+    (1, 4),
+    (100000, 4),
+    (100000.01, -3),
+    (200000, -3),
+    (200000.01, -8),
+  ],
+)
+def test_case_amount_risk_treats_unfilled_amount_as_neutral(amount: float, expected: int) -> None:
+  assert assessment_workflow._amount_risk(amount) == expected
 
 
 def _create_demo_case(store: InMemoryStore):

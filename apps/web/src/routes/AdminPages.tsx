@@ -11,7 +11,7 @@ import {
   useReviewAdminLawyerMutation,
   useUpdateAdminUserMutation
 } from '../hooks/useCaseQueries';
-import { formatDate, formatMoney } from '../lib/format';
+import { formatCaseAmount, formatDate } from '../lib/format';
 import type { User, UserRole } from '../lib/types';
 
 export function AdminDashboardPage() {
@@ -130,7 +130,7 @@ export function AdminCasesPage() {
             </div>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <span className="rounded-lg bg-slate-50 p-3">
-                <b className="block text-slate-950">{formatMoney(lawCase.amount)}</b>
+                <b className="block text-slate-950">{formatCaseAmount(lawCase.amount)}</b>
                 <small className="text-slate-500">登记金额</small>
               </span>
               <span className="rounded-lg bg-slate-50 p-3">

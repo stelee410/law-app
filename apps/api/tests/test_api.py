@@ -51,6 +51,57 @@ def _case_create_payload(case_type: str = "debt_collection", **overrides: object
   return payload
 
 
+@pytest.mark.parametrize("case_type", ["lawyer_letter", "contract_review"])
+def test_case_creation_accepts_zero_amount_for_optional_case_types(case_type: str) -> None:
+  client = TestClient(create_app(_test_settings()))
+  headers = _register_client(client)
+
+  created = client.post(
+    "/api/v1/cases",
+    headers=headers,
+    json=_case_create_payload(case_type, amount=0),
+  )
+
+  assert created.status_code == 201
+  assert created.json()["case"]["amount"] == 0
+
+
+@pytest.mark.parametrize("case_type", ["debt_collection", "labor_dispute", "rental_dispute"])
+def test_case_creation_rejects_zero_amount_for_required_case_types(case_type: str) -> None:
+  client = TestClient(create_app(_test_settings()))
+  headers = _register_client(client)
+
+  created = client.post(
+    "/api/v1/cases",
+    headers=headers,
+    json=_case_create_payload(case_type, amount=0),
+  )
+
+  assert created.status_code == 422
+  assert any(
+    item["loc"][-1] == "amount" and "CASE_AMOUNT_REQUIRED" in item["msg"]
+    for item in created.json()["detail"]
+  )
+
+
+@pytest.mark.parametrize(
+  "case_type",
+  ["debt_collection", "lawyer_letter", "labor_dispute", "rental_dispute", "contract_review"],
+)
+def test_case_creation_rejects_negative_amount(case_type: str) -> None:
+  client = TestClient(create_app(_test_settings()))
+  headers = _register_client(client)
+
+  created = client.post(
+    "/api/v1/cases",
+    headers=headers,
+    json=_case_create_payload(case_type, amount=-1),
+  )
+
+  assert created.status_code == 422
+  assert any(item["loc"][-1] == "amount" for item in created.json()["detail"])
+
+
 @pytest.mark.parametrize(
   "case_type",
   ["debt_collection", "lawyer_letter", "labor_dispute", "rental_dispute", "contract_review"],
@@ -924,6 +975,74 @@ def test_self_service_documents_use_case_specific_legal_knowledge(
     assert term not in document["body"]
 
 
+@pytest.mark.parametrize(
+  ("case_type", "amount_label"),
+  [
+    ("lawyer_letter", "诉求金额/标的"),
+    ("contract_review", "合同金额"),
+  ],
+)
+def test_optional_amount_self_service_documents_omit_zero_amount(
+  case_type: str,
+  amount_label: str,
+) -> None:
+  client = TestClient(create_app(_test_settings()))
+  client_headers = _register_client(client, phone=f"137{len(case_type):08d}")
+  case_id = _create_case(client, client_headers, case_type=case_type, amount=0)
+  _upload_required_evidence(client, client_headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+
+  selected = client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "self-service"},
+  )
+  assert selected.status_code == 200
+
+  documents = client.get(f"/api/v1/cases/{case_id}/documents", headers=client_headers)
+  document = next(
+    item
+    for item in documents.json()["documents"]
+    if item["fields"].get("source") == "ai_self_service"
+  )
+  assert amount_label not in document["body"]
+  assert "￥0" not in document["body"]
+  assert "人民币 0 元" not in document["body"]
+
+
+def test_zero_amount_llm_enhancement_falls_back_to_omitted_amount(monkeypatch) -> None:
+  client = TestClient(create_app(_test_settings(
+    OPENAI_API_BASE="https://llm.example.test/v1",
+    OPENAI_API_KEY="test-key",
+    DEFAULT_LLM_MODEL="test-model",
+  )))
+  client_headers = _register_client(client, phone="13800004320")
+  case_id = _create_case(client, client_headers, case_type="contract_review", amount=0)
+  _upload_required_evidence(client, client_headers, case_id)
+  assert client.post(f"/api/v1/cases/{case_id}/evaluate", headers=client_headers).status_code == 200
+
+  def zero_amount_enhanced_body(_settings, _law_case, template_body):
+    return f"{template_body}\n合同金额：人民币 0 元"
+
+  monkeypatch.setattr(store_module, "generate_self_service_document_body", zero_amount_enhanced_body)
+
+  selected = client.post(
+    f"/api/v1/cases/{case_id}/plan",
+    headers=client_headers,
+    json={"planId": "self-service"},
+  )
+  assert selected.status_code == 200
+
+  documents = client.get(f"/api/v1/cases/{case_id}/documents", headers=client_headers)
+  document = next(
+    item
+    for item in documents.json()["documents"]
+    if item["fields"].get("source") == "ai_self_service"
+  )
+  assert "合同金额" not in document["body"]
+  assert "人民币 0 元" not in document["body"]
+
+
 def test_self_service_llm_enhancement_falls_back_when_legal_basis_is_invalid(monkeypatch) -> None:
   client = TestClient(create_app(_test_settings(
     OPENAI_API_BASE="https://llm.example.test/v1",
@@ -1595,7 +1714,12 @@ def _create_approved_lawyer_letter_case(
   return client_headers, lawyer_headers, case_id, approved_document.json()["document"]
 
 
-def _create_case(client: TestClient, headers: dict[str, str], case_type: str = "debt_collection") -> str:
+def _create_case(
+  client: TestClient,
+  headers: dict[str, str],
+  case_type: str = "debt_collection",
+  amount: float | None = None,
+) -> str:
   case_payloads = {
     "debt_collection": {
       "debtorName": "北京YY贸易有限公司",
@@ -1639,6 +1763,7 @@ def _create_case(client: TestClient, headers: dict[str, str], case_type: str = "
     },
   }
   case_payload = case_payloads[case_type]
+  case_amount = case_payload["amount"] if amount is None else amount
   created = client.post(
     "/api/v1/cases",
     headers=headers,
@@ -1647,7 +1772,7 @@ def _create_case(client: TestClient, headers: dict[str, str], case_type: str = "
       "debtorName": case_payload["debtorName"],
       "contactName": "李女士",
       "contactPhone": "13900001111",
-      "amount": case_payload["amount"],
+      "amount": case_amount,
       "contractDate": "2024-05-02",
       "dispute": case_payload["dispute"],
       "dueStatus": "已到期",

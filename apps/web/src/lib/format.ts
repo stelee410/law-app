@@ -6,6 +6,10 @@ export function formatMoney(amount: number) {
   }).format(amount);
 }
 
+export function formatCaseAmount(amount: number) {
+  return amount > 0 ? formatMoney(amount) : '未填写';
+}
+
 export function formatDate(value: string) {
   return value ? value.slice(0, 10) : '--';
 }

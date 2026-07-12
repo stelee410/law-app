@@ -1,10 +1,10 @@
 import { Link } from '@tanstack/react-router';
 import { BadgeCheck, CheckCircle2, Headphones, ShieldCheck } from 'lucide-react';
-import { formatMoney } from '../../lib/format';
+import { formatCaseAmount, formatMoney } from '../../lib/format';
 import type { AssessmentResult, PlanId } from '../../lib/types';
 import { MetricCard } from './MetricCard';
 
-export function AssessmentSummary({ assessment, caseId, selectedPlan }: { assessment: AssessmentResult; caseId: string; selectedPlan?: PlanId }) {
+export function AssessmentSummary({ assessment, caseId, selectedPlan, amount }: { assessment: AssessmentResult; caseId: string; selectedPlan?: PlanId; amount: number }) {
   return (
     <div className="space-y-4">
       <section className="rounded-lg border border-slate-100 bg-white p-4 shadow-sm">
@@ -28,7 +28,7 @@ export function AssessmentSummary({ assessment, caseId, selectedPlan }: { assess
       <section className="grid grid-cols-2 gap-3">
         <MetricCard label="建议路径" value={assessment.suggestedRoute} tone="blue" />
         <MetricCard label="预计周期" value={assessment.estimatedDays} tone="warm" />
-        <MetricCard label="预计回收" value={formatMoney(assessment.estimatedRecovery)} tone="green" />
+        <MetricCard label="预计回收" value={amount > 0 ? formatMoney(assessment.estimatedRecovery) : formatCaseAmount(amount)} tone="green" />
         <MetricCard label="证据可信度" value={assessment.confidence} tone="slate" />
       </section>
 

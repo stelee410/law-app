@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
 EvidenceStatus = Literal["pending", "uploaded", "recognized", "optional"]
@@ -386,7 +386,7 @@ class CreateCaseInput(ApiModel):
   debtorName: str = Field(min_length=2)
   contactName: str = Field(min_length=2)
   contactPhone: str = Field(min_length=6)
-  amount: float = Field(gt=0)
+  amount: float = Field(ge=0)
   contractDate: str = Field(min_length=8)
   dispute: str
   dueStatus: DueStatus
@@ -398,6 +398,13 @@ class CreateCaseInput(ApiModel):
   claimSummary: str
   privacyConsent: bool = True
   matterFields: dict[str, Any] = Field(default_factory=dict)
+
+  @field_validator("amount")
+  @classmethod
+  def require_amount_for_case_type(cls, value: float, info: ValidationInfo) -> float:
+    if info.data.get("caseType") in {"debt_collection", "labor_dispute", "rental_dispute"} and value <= 0:
+      raise ValueError("CASE_AMOUNT_REQUIRED")
+    return value
 
   @field_validator("dispute", "claimSummary")
   @classmethod

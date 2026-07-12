@@ -72,7 +72,7 @@ def _build_enhanced_self_service_payload(settings: Settings, law_case: LawCase) 
     enhanced = None
   if enhanced is not None:
     enhanced_body = ensure_ai_notice(enhanced)
-    if validate_self_service_body(law_case.caseType, enhanced_body):
+    if validate_self_service_body(law_case, enhanced_body):
       payload.body = enhanced_body
     else:
       logger.info(
